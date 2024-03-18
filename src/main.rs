@@ -19,6 +19,8 @@ const RIGHT_WALL: f32 = 450.;
 const BOTTOM_WALL: f32 = -300.;
 const TOP_WALL: f32 = 300.;
 
+const GOAL_THICKNESS: f32 = 3.;
+
 const SCORE_A_POSITION: Vec3 = Vec3::new(-150., 200., 0.0);
 const SCORE_B_POSITION: Vec3 = Vec3::new(150., 200., 0.0);
 
@@ -28,6 +30,7 @@ const BACKGROUND_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
 const PADDLE_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
 const BALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
 const WALL_COLOR: Color = Color::rgb(0.8, 0.8, 0.8);
+const GOAL_COLOR: Color = Color::rgb(0., 0., 0.8);
 const SCORE_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
 
 fn main() {
@@ -51,6 +54,7 @@ fn main() {
         .run();
 }
 
+#[derive(Component)]
 enum Player {
     A,
     B,
@@ -74,15 +78,17 @@ struct CollisionEvent;
 #[derive(Resource)]
 struct CollisionSound(Handle<AudioSource>);
 
+#[derive(Component)]
+struct Wall;
+
 #[derive(Bundle)]
 struct WallBundle {
     sprite_bundle: SpriteBundle,
     collider: Collider,
+    boundary_type: Wall,
 }
 
 enum WallLocation {
-    Left,
-    Right,
     Bottom,
     Top,
 }
@@ -90,8 +96,6 @@ enum WallLocation {
 impl WallLocation {
     fn position(&self) -> Vec2 {
         match self {
-            WallLocation::Left => Vec2::new(LEFT_WALL, 0.),
-            WallLocation::Right => Vec2::new(RIGHT_WALL, 0.),
             WallLocation::Bottom => Vec2::new(0., BOTTOM_WALL),
             WallLocation::Top => Vec2::new(0., TOP_WALL),
         }
@@ -103,9 +107,6 @@ impl WallLocation {
         assert!(arena_width > 0.);
 
         match self {
-            WallLocation::Left | WallLocation::Right => {
-                Vec2::new(WALL_THICKNESS, arena_height + WALL_THICKNESS)
-            }
             WallLocation::Bottom | WallLocation::Top => {
                 Vec2::new(arena_width + WALL_THICKNESS, WALL_THICKNESS)
             }
@@ -129,6 +130,64 @@ impl WallBundle {
                 ..default()
             },
             collider: Collider,
+            boundary_type: Wall,
+        }
+    }
+}
+
+#[derive(Component)]
+struct Goal;
+
+#[derive(Bundle)]
+struct GoalBundle {
+    sprite_bundle: SpriteBundle,
+    collider: Collider,
+    boundary_type: Goal,
+}
+
+enum GoalLocation {
+    Left,
+    Right,
+}
+
+impl GoalLocation {
+    fn position(&self) -> Vec2 {
+        match self {
+            GoalLocation::Left => Vec2::new(LEFT_WALL, 0.),
+            GoalLocation::Right => Vec2::new(RIGHT_WALL, 0.),
+        }
+    }
+    fn size(&self) -> Vec2 {
+        let arena_height = TOP_WALL - BOTTOM_WALL;
+        let arena_width = RIGHT_WALL - LEFT_WALL;
+        assert!(arena_height > 0.);
+        assert!(arena_width > 0.);
+
+        match self {
+            GoalLocation::Left | GoalLocation::Right => {
+                Vec2::new(GOAL_THICKNESS, arena_height + WALL_THICKNESS)
+            }
+        }
+    }
+}
+
+impl GoalBundle {
+    fn new(location: GoalLocation) -> GoalBundle {
+        GoalBundle {
+            sprite_bundle: SpriteBundle {
+                transform: Transform {
+                    translation: location.position().extend(0.0),
+                    scale: location.size().extend(1.0),
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: GOAL_COLOR,
+                    ..default()
+                },
+                ..default()
+            },
+            collider: Collider,
+            boundary_type: Goal,
         }
     }
 }
@@ -174,22 +233,22 @@ fn setup(
     ));
 
     // Paddle B
-    // commands.spawn((
-    //     SpriteBundle {
-    //         transform: Transform {
-    //             translation: Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_BACKWALL, paddle_y, 0.),
-    //             scale: PADDLE_SIZE,
-    //             ..default()
-    //         },
-    //         sprite: Sprite {
-    //             color: PADDLE_COLOR,
-    //             ..default()
-    //         },
-    //         ..default()
-    //     },
-    //     Paddle(Player::B),
-    //     Collider,
-    // ));
+    commands.spawn((
+        SpriteBundle {
+            transform: Transform {
+                translation: Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_BACKWALL, paddle_y, 0.),
+                scale: PADDLE_SIZE,
+                ..default()
+            },
+            sprite: Sprite {
+                color: PADDLE_COLOR,
+                ..default()
+            },
+            ..default()
+        },
+        Paddle(Player::B),
+        Collider,
+    ));
 
     // Ball
     commands.spawn((
@@ -230,10 +289,10 @@ fn setup(
         }),
     ));
 
-    commands.spawn(WallBundle::new(WallLocation::Left));
-    commands.spawn(WallBundle::new(WallLocation::Right));
     commands.spawn(WallBundle::new(WallLocation::Bottom));
     commands.spawn(WallBundle::new(WallLocation::Top));
+    commands.spawn(GoalBundle::new(GoalLocation::Left));
+    commands.spawn(GoalBundle::new(GoalLocation::Right));
 }
 
 fn initial_ball_direction() -> Vec2 {
@@ -242,27 +301,49 @@ fn initial_ball_direction() -> Vec2 {
 
 fn move_paddle(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut Transform, With<Paddle>>,
+    mut query: Query<(&mut Transform, &Paddle)>,
     time: Res<Time>,
 ) {
-    let mut paddle_transform = query.single_mut();
-    let mut direction = 0.;
+    for (mut transform, paddle) in query.iter_mut() {
+        match paddle.0 {
+            Player::A => {
+                let mut direction = 0.;
 
-    if keyboard_input.pressed(KeyCode::KeyW) {
-        direction += 1.;
+                if keyboard_input.pressed(KeyCode::KeyW) {
+                    direction += 1.;
+                }
+                if keyboard_input.pressed(KeyCode::KeyS) {
+                    direction -= 1.;
+                }
+
+                let new_paddle_position =
+                    transform.translation.y + direction * PADDLE_SPEED * time.delta_seconds();
+
+                let top_bound = TOP_WALL - WALL_THICKNESS / 2.0 - PADDLE_SIZE.y / 2.0;
+                let bottom_bound = BOTTOM_WALL + WALL_THICKNESS / 2.0 + PADDLE_SIZE.y / 2.0;
+
+                transform.translation.y = new_paddle_position.clamp(bottom_bound, top_bound);
+            }
+            Player::B => {
+                let mut direction = 0.;
+
+                if keyboard_input.pressed(KeyCode::ArrowUp) {
+                    direction += 1.;
+                }
+                if keyboard_input.pressed(KeyCode::ArrowDown) {
+                    direction -= 1.;
+                }
+
+                let new_paddle_position =
+                    transform.translation.y + direction * PADDLE_SPEED * time.delta_seconds();
+
+                let top_bound = TOP_WALL - WALL_THICKNESS / 2.0 - PADDLE_SIZE.y / 2.0;
+                let bottom_bound = BOTTOM_WALL + WALL_THICKNESS / 2.0 + PADDLE_SIZE.y / 2.0;
+
+                transform.translation.y = new_paddle_position.clamp(bottom_bound, top_bound);
+            }
+        }
     }
-
-    if keyboard_input.pressed(KeyCode::KeyS) {
-        direction -= 1.;
-    }
-
-    let new_paddle_position =
-        paddle_transform.translation.y + direction * PADDLE_SPEED * time.delta_seconds();
-
-    let top_bound = TOP_WALL - WALL_THICKNESS / 2.0 - PADDLE_SIZE.y / 2.0;
-    let bottom_bound = BOTTOM_WALL + WALL_THICKNESS / 2.0 + PADDLE_SIZE.y / 2.0;
-
-    paddle_transform.translation.y = new_paddle_position.clamp(bottom_bound, top_bound);
 }
 
 fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<Time>) {
@@ -276,12 +357,12 @@ fn check_for_collisions(
     mut commands: Commands,
     mut scores: ResMut<Scores>,
     mut ball_query: Query<(&mut Velocity, &Transform), With<Ball>>,
-    mut collider_query: Query<(Entity, &Transform), With<Collider>>,
+    mut collider_query: Query<(Entity, &Transform, Option<&Wall>, Option<&Goal>), With<(Collider)>>,
     mut collision_events: EventWriter<CollisionEvent>,
 ) {
     let (mut ball_velocity, ball_transform) = ball_query.single_mut();
 
-    for (collider_entity, transform) in &collider_query {
+    for (collider_entity, transform, wall, goal) in &collider_query {
         let collision = collide_with_side(
             BoundingCircle::new(ball_transform.translation.truncate(), BALL_R),
             Aabb2d::new(
@@ -291,24 +372,32 @@ fn check_for_collisions(
         );
 
         if let Some(collision) = collision {
-            collision_events.send_default();
-
-            let mut reflect_x = false;
-            let mut reflect_y = false;
-
-            match collision {
-                Collision::Left => reflect_x = ball_velocity.x > 0.,
-                Collision::Right => reflect_x = ball_velocity.x < 0.,
-                Collision::Top => reflect_y = ball_velocity.y < 0.,
-                Collision::Bottom => reflect_y = ball_velocity.y > 0.,
+            if let Some(wall) = wall {
+                collision_events.send_default();
+    
+                let mut reflect_y = false;
+    
+                match collision {
+                    // Collision::Left => reflect_x = ball_velocity.x > 0.,
+                    // Collision::Right => reflect_x = ball_velocity.x < 0.,
+                    Collision::Top => reflect_y = ball_velocity.y < 0.,
+                    Collision::Bottom => reflect_y = ball_velocity.y > 0.,
+                    _ => {}
+                }
+    
+                if reflect_y {
+                    ball_velocity.y = -ball_velocity.y;
+                }
             }
 
-            if reflect_x {
-                ball_velocity.x = -ball_velocity.x;
-            }
-
-            if reflect_y {
-                ball_velocity.y = -ball_velocity.y;
+            if let Some(goal) = goal {
+                collision_events.send_default();
+    
+                match collision {
+                    Collision::Left => {},  /* TODO increase score for B */
+                    Collision::Right => {},  /* TODO increase score for A */
+                    _ => {}
+                }
             }
         }
     }
@@ -338,12 +427,12 @@ enum Collision {
     Bottom,
 }
 
-fn collide_with_side(ball: BoundingCircle, wall: Aabb2d) -> Option<Collision> {
-    if !ball.intersects(&wall) {
+fn collide_with_side(ball: BoundingCircle, boundary: Aabb2d) -> Option<Collision> {
+    if !ball.intersects(&boundary) {
         return None;
     }
 
-    let closest = wall.closest_point(ball.center());
+    let closest = boundary.closest_point(ball.center());
     let offset = ball.center() - closest;
     let side = if offset.x.abs() > offset.y.abs() {
         if offset.x < 0. {
