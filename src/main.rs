@@ -36,9 +36,9 @@ const SCORE_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .insert_resource(Scores { a: 0, b: 0 })
         .insert_resource(ClearColor(BACKGROUND_COLOR))
         .add_event::<CollisionEvent>()
+        .add_event::<ScoreEvent>()
         .add_systems(Startup, setup)
         .add_systems(
             FixedUpdate,
@@ -47,6 +47,7 @@ fn main() {
                 move_paddle,
                 check_for_collisions,
                 play_collision_sound,
+                end_round,
             )
                 .chain(),
         )
@@ -72,11 +73,26 @@ struct Velocity(Vec2);
 #[derive(Component)]
 struct Collider;
 
-#[derive(Event, Default)]
-struct CollisionEvent;
+#[derive(Event)]
+enum CollisionEvent {
+    Wall,
+    Paddle,
+    Goal,
+}
 
+#[derive(Event)]
+enum ScoreEvent {
+    A,
+    B,
+}
+
+// TODO 3 sounds: goal, paddle, wall
 #[derive(Resource)]
-struct CollisionSound(Handle<AudioSource>);
+struct CollisionSound {
+    wall: Handle<AudioSource>,
+    paddle: Handle<AudioSource>,
+    goal: Handle<AudioSource>,
+}
 
 #[derive(Component)]
 struct Wall;
@@ -153,8 +169,8 @@ enum GoalLocation {
 impl GoalLocation {
     fn position(&self) -> Vec2 {
         match self {
-            GoalLocation::Left => Vec2::new(LEFT_WALL, 0.),
-            GoalLocation::Right => Vec2::new(RIGHT_WALL, 0.),
+            GoalLocation::Left => Vec2::new(LEFT_WALL, -GOAL_THICKNESS / 2.),
+            GoalLocation::Right => Vec2::new(RIGHT_WALL, -GOAL_THICKNESS / 2.),
         }
     }
     fn size(&self) -> Vec2 {
@@ -199,7 +215,7 @@ struct Scores {
 }
 
 #[derive(Component)]
-struct ScoreboardUi;
+struct ScoreboardUi(Player);
 
 fn setup(
     mut commands: Commands,
@@ -209,8 +225,15 @@ fn setup(
 ) {
     commands.spawn(Camera2dBundle::default());
 
-    let ball_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
-    commands.insert_resource(CollisionSound(ball_collision_sound));
+    let wall_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
+    let paddle_collision_sound = asset_server.load("sounds/med_shoot.wav");
+    let goal_collision_sound = asset_server.load("sounds/jump.wav");
+    commands.insert_resource(CollisionSound {
+        wall: wall_collision_sound,
+        paddle: paddle_collision_sound,
+        goal: goal_collision_sound,
+    });
+    commands.insert_resource(Scores { a: 0, b: 0 });
 
     let paddle_y = 0.;
 
@@ -263,28 +286,34 @@ fn setup(
         Velocity(initial_ball_direction() * BALL_START_SPEED),
     ));
 
-    // Score
+    // Scores
+    // A
     commands.spawn((
-        ScoreboardUi,
-        TextBundle::from_sections([
-            TextSection::new(
-                "Score: ",
-                TextStyle {
-                    font_size: SCORE_FONT_SIZE,
-                    color: SCORE_COLOR,
-                    ..default()
-                },
-            ),
-            TextSection::from_style(TextStyle {
-                font_size: SCORE_FONT_SIZE,
-                color: SCORE_COLOR,
-                ..default()
-            }),
-        ])
+        ScoreboardUi(Player::A),
+        TextBundle::from_sections([TextSection::from_style(TextStyle {
+            font_size: SCORE_FONT_SIZE,
+            color: SCORE_COLOR,
+            ..default()
+        })])
         .with_style(Style {
-            position_type: PositionType::Absolute,
-            top: Val::Px(5.),
-            left: Val::Px(5.),
+            position_type: PositionType::Relative,
+            top: Val::Percent(10.),
+            left: Val::Percent(20.),
+            ..default()
+        }),
+    ));
+    // B
+    commands.spawn((
+        ScoreboardUi(Player::B),
+        TextBundle::from_sections([TextSection::from_style(TextStyle {
+            font_size: SCORE_FONT_SIZE,
+            color: SCORE_COLOR,
+            ..default()
+        })])
+        .with_style(Style {
+            position_type: PositionType::Relative,
+            top: Val::Percent(10.),
+            left: Val::Percent(80.),
             ..default()
         }),
     ));
@@ -296,7 +325,10 @@ fn setup(
 }
 
 fn initial_ball_direction() -> Vec2 {
-    Vec2::new(-1., 0.)
+    // up-left hits paddle
+    // Vec2::new(-0.5, 0.8)
+    // down-left misses paddle
+    Vec2::new(-0.5, -0.5)
 }
 
 fn move_paddle(
@@ -356,13 +388,14 @@ fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<Time>
 fn check_for_collisions(
     mut commands: Commands,
     mut scores: ResMut<Scores>,
-    mut ball_query: Query<(&mut Velocity, &Transform), With<Ball>>,
-    mut collider_query: Query<(Entity, &Transform, Option<&Wall>, Option<&Goal>), With<(Collider)>>,
+    mut ball_query: Query<(Entity, &mut Velocity, &Transform), With<Ball>>,
+    mut collider_query: Query<(Entity, &Transform, Option<&Goal>, Option<&Wall>), With<(Collider)>>,
     mut collision_events: EventWriter<CollisionEvent>,
+    mut score_events: EventWriter<ScoreEvent>,
 ) {
-    let (mut ball_velocity, ball_transform) = ball_query.single_mut();
+    let (mut ball_entity, mut ball_velocity, ball_transform) = ball_query.single_mut();
 
-    for (collider_entity, transform, wall, goal) in &collider_query {
+    for (collider_entity, transform, goal, wall) in &collider_query {
         let collision = collide_with_side(
             BoundingCircle::new(ball_transform.translation.truncate(), BALL_R),
             Aabb2d::new(
@@ -372,50 +405,55 @@ fn check_for_collisions(
         );
 
         if let Some(collision) = collision {
-            if let Some(wall) = wall {
-                collision_events.send_default();
-    
-                let mut reflect_y = false;
-    
+            if goal.is_some() {
+                collision_events.send(CollisionEvent::Goal);
+
                 match collision {
-                    // Collision::Left => reflect_x = ball_velocity.x > 0.,
-                    // Collision::Right => reflect_x = ball_velocity.x < 0.,
+                    Collision::Right => {
+                        score_events.send(ScoreEvent::A);
+                    }
+                    Collision::Left => {
+                        score_events.send(ScoreEvent::B);
+                    }
+                    _ => {}
+                }
+            } else if wall.is_some() {
+                collision_events.send(CollisionEvent::Wall);
+
+                let mut reflect_y = false;
+
+                match collision {
                     Collision::Top => reflect_y = ball_velocity.y < 0.,
                     Collision::Bottom => reflect_y = ball_velocity.y > 0.,
                     _ => {}
                 }
-    
+
                 if reflect_y {
                     ball_velocity.y = -ball_velocity.y;
                 }
-            }
+            } else {
+                collision_events.send(CollisionEvent::Paddle);
 
-            if let Some(goal) = goal {
-                collision_events.send_default();
-    
+                let mut reflect_y = false;
+                let mut reflect_x = false;
+
                 match collision {
-                    Collision::Left => {},  /* TODO increase score for B */
-                    Collision::Right => {},  /* TODO increase score for A */
+                    Collision::Left => reflect_x = ball_velocity.x > 0.,
+                    Collision::Right => reflect_x = ball_velocity.x < 0.,
+                    Collision::Top => reflect_y = ball_velocity.y < 0.,
+                    Collision::Bottom => reflect_y = ball_velocity.y > 0.,
                     _ => {}
+                }
+
+                if reflect_y {
+                    ball_velocity.y = -ball_velocity.y;
+                }
+
+                if reflect_x {
+                    ball_velocity.x = -ball_velocity.x;
                 }
             }
         }
-    }
-}
-
-fn play_collision_sound(
-    mut commands: Commands,
-    mut collision_events: EventReader<CollisionEvent>,
-    sound: Res<CollisionSound>,
-) {
-    // play sound once per frame if collision occurred
-    if !collision_events.is_empty() {
-        // this prevents events staying active next frame (since events last for 2 frames until auto-cleaned up by engine)
-        collision_events.clear();
-        commands.spawn(AudioBundle {
-            source: sound.0.clone(),
-            settings: PlaybackSettings::DESPAWN,
-        });
     }
 }
 
@@ -449,6 +487,88 @@ fn collide_with_side(ball: BoundingCircle, boundary: Aabb2d) -> Option<Collision
     Some(side)
 }
 
-fn update_scores(scores: Res<Scores>, mut query: Query<&mut Text, With<ScoreboardUi>>) {
-    let mut scores = query.single_mut();
+fn update_scores(scores: Res<Scores>, mut query: Query<(&mut Text, &ScoreboardUi)>) {
+    for (mut score, scoreboard) in &mut query {
+        match scoreboard.0 {
+            Player::A => {
+                score.sections[0].value = scores.a.to_string();
+            }
+            Player::B => {
+                score.sections[0].value = scores.b.to_string();
+            }
+        }
+    }
+}
+
+fn play_collision_sound(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    sound: Res<CollisionSound>,
+) {
+    // play sound once per frame if collision occurred
+    for ev in collision_events.read() {
+        match ev {
+            CollisionEvent::Wall => {
+                commands.spawn(AudioBundle {
+                    source: sound.wall.clone(),
+                    settings: PlaybackSettings::DESPAWN,
+                });
+            }
+            CollisionEvent::Paddle => {
+                commands.spawn(AudioBundle {
+                    source: sound.paddle.clone(),
+                    settings: PlaybackSettings::DESPAWN,
+                });
+            }
+            CollisionEvent::Goal => {
+                commands.spawn(AudioBundle {
+                    source: sound.goal.clone(),
+                    settings: PlaybackSettings::DESPAWN,
+                });
+            }
+        }
+    }
+
+    // ? not sure if this needed
+    if !collision_events.is_empty() {
+        // this prevents events staying active next frame (since events last for 2 frames until auto-cleaned up by engine)
+        collision_events.clear();
+    }
+}
+
+fn end_round(
+    mut scores: Res<Scores>,
+    mut commands: Commands,
+    mut score_events: EventReader<ScoreEvent>,
+    mut ball_query: Query<(Entity, &mut Transform, &mut Velocity), With<Ball>>,
+) {
+    for ev in score_events.read() {
+        match ev {
+            ScoreEvent::A => {
+                println!("score for A",);
+                let mut a = scores.a;
+                a += 1;
+
+                let (ball_entity, mut ball_transform, mut ball_velocity) = ball_query.single_mut();
+                let mut translation = ball_transform.translation;
+                translation = BALL_START_POSITION;
+                *ball_velocity = Velocity(initial_ball_direction() * BALL_START_SPEED);
+            }
+            ScoreEvent::B => {
+                println!("score for B",);
+                let mut b = scores.b;
+                b += 1;
+
+                let (ball_entity, mut ball_transform, mut ball_velocity) = ball_query.single_mut();
+                let mut translation = ball_transform.translation;
+                // translation = BALL_START_POSITION;
+                translation = Vec3::new(200., 0., 1.);
+                *ball_velocity = Velocity(initial_ball_direction() * BALL_START_SPEED);
+            }
+        }
+    }
+    // if !score_events.is_empty() {
+    //     // this prevents events staying active next frame (since events last for 2 frames until auto-cleaned up by engine)
+    //     score_events.clear();
+    // }
 }
