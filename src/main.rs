@@ -15,7 +15,7 @@ const PADDLE_SPEED: f32 = 500.;
 
 const BALL_START_POSITION: Vec3 = Vec3::new(0., 0., 1.);
 const BALL_R: f32 = 15.;
-const BALL_START_SPEED: f32 = 400.;
+const BALL_START_SPEED: f32 = 800.;
 
 const WALL_THICKNESS: f32 = 10.;
 const LEFT_WALL: f32 = -450.;
@@ -42,11 +42,54 @@ const PADDLE_B_START_VEC: Vec3 = Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_B
 
 const ROUNDS_TOTAL: usize = 2;
 
+struct TheGamePlugin;
+impl Plugin for TheGamePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            FixedUpdate,
+            (
+                apply_velocity,
+                move_paddle,
+                check_for_collisions,
+                play_collision_sound,
+                process_score,
+                tick,
+            )
+                .chain()
+                .in_set(PlaySet),
+        )
+        .add_systems(
+            Update,
+            (
+                (draw_scores, bevy::window::close_on_esc).in_set(PlaySet),
+                run_scored_view.run_if(in_state(RoundState::Scored)),
+                round_countdown.run_if(in_state(RoundState::Countdown)),
+            ),
+        )
+        .add_systems(OnEnter(GameState::Match), setup_match)
+        .add_systems(OnEnter(RoundState::In), setup_round)
+        .configure_sets(
+            Update,
+            (
+                MainMenuSet.run_if(in_state(GameState::MainMenu)),
+                PlaySet.run_if(in_state(RoundState::In)),
+                // (show_scorer, freeze_inputs, freeze_sim).run_if(in_state(RoundState::Scored))
+                // (countdown_round, freeze_inputs, freeze_sim).run_if(in_state(RoundState::Countdown))
+                // (show_final_score, freeze_inputs, freeze_sim).run_if(in_state(GameState::End))
+            ),
+        )
+        .configure_sets(FixedUpdate, (PlaySet.run_if(in_state(RoundState::In)),))
+        .add_event::<CollisionEvent>()
+        .add_event::<ScoreEvent>();
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(BACKGROUND_COLOR))
         .init_state::<GameState>()
+        .init_state::<RoundState>()
         .add_systems(Startup, setup)
         .add_plugins(TheGamePlugin)
         .run();
@@ -57,7 +100,16 @@ enum GameState {
     #[default]
     MainMenu,
     Match,
-    Round,
+    End,
+}
+
+#[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
+enum RoundState {
+    #[default]
+    Out,
+    In,
+    Scored,
+    Countdown,
 }
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,40 +117,6 @@ struct MainMenuSet;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlaySet;
-
-// #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-// struct EndMatchSet;
-
-struct TheGamePlugin;
-
-impl Plugin for TheGamePlugin {
-    fn build(&self, app: &mut App) {
-        // Define Sets
-        app.add_systems(
-            FixedUpdate,
-            (
-                apply_velocity,
-                move_paddle,
-                check_for_collisions,
-                play_collision_sound,
-            )
-                .chain()
-                .in_set(PlaySet),
-        )
-        .add_systems(
-            Update,
-            (update_scores, bevy::window::close_on_esc).in_set(PlaySet),
-        )
-        .add_systems(OnEnter(GameState::Match), setup_match)
-        // .add_systems(OnExit(GameState::Match), end_match)
-        .add_systems(OnEnter(GameState::Round), setup_round)
-        // .add_systems(OnExit(GameState::Round), end_round)
-        // .configure_sets(FixedUpdate, (PlaySet.run_if(in_state(GameState::Round))))
-        // .configure_sets(Update, PlaySet.run_if(in_state(GameState::Round)))
-        .add_event::<CollisionEvent>()
-        .add_event::<ScoreEvent>();
-    }
-}
 
 #[derive(Component)]
 enum Player {

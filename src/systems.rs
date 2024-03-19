@@ -6,11 +6,11 @@ use bevy::{
 
 use crate::{
     Ball, Collider, CollisionEvent, CollisionSound, GameState, Goal, GoalBundle, GoalLocation,
-    Match, Paddle, Player, ScoreEvent, ScoreboardUi, Scores, Velocity, Wall, WallBundle,
-    WallLocation, BALL_COLOR, BALL_R, BALL_START_POSITION, BALL_START_SPEED, BOTTOM_WALL,
-    GAP_BETWEEN_PADDLE_AND_BACKWALL, LEFT_WALL, PADDLE_A_START_VEC, PADDLE_B_START_VEC,
-    PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED, RIGHT_WALL, ROUNDS_TOTAL, SCORE_COLOR,
-    SCORE_FONT_SIZE, TOP_WALL, WALL_THICKNESS,
+    Match, Paddle, Player, RoundState, ScoreEvent, ScoreboardUi, Scores, Velocity, Wall,
+    WallBundle, WallLocation, BALL_COLOR, BALL_R, BALL_START_POSITION, BALL_START_SPEED,
+    BOTTOM_WALL, GAP_BETWEEN_PADDLE_AND_BACKWALL, LEFT_WALL, PADDLE_A_START_VEC,
+    PADDLE_B_START_VEC, PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED, RIGHT_WALL, ROUNDS_TOTAL,
+    SCORE_COLOR, SCORE_FONT_SIZE, TOP_WALL, WALL_THICKNESS,
 };
 
 pub fn setup(
@@ -134,7 +134,6 @@ pub fn move_paddle(
     mut query: Query<(&mut Transform, &Player), With<Paddle>>,
     time: Res<Time>,
 ) {
-    // ? &mut
     for (mut transform, player) in query.iter_mut() {
         match player {
             Player::A => {
@@ -191,6 +190,7 @@ pub fn check_for_collisions(
     mut collider_query: Query<(Entity, &Transform, Option<&Goal>, Option<&Wall>), With<(Collider)>>,
     mut collision_events: EventWriter<CollisionEvent>,
     mut score_events: EventWriter<ScoreEvent>,
+    mut next_state: ResMut<NextState<RoundState>>,
 ) {
     let (mut ball_entity, mut ball_velocity, ball_transform) = ball_query.single_mut();
 
@@ -209,13 +209,9 @@ pub fn check_for_collisions(
 
                 match collision {
                     Collision::Right => {
-                        let mut a = scores.a;
-                        a += 1;
                         score_events.send(ScoreEvent::A);
                     }
                     Collision::Left => {
-                        let mut b = scores.b;
-                        b += 1;
                         score_events.send(ScoreEvent::B);
                     }
                     _ => {}
@@ -297,7 +293,7 @@ pub fn collide_with_side(ball: BoundingCircle, boundary: Aabb2d) -> Option<Colli
     Some(side)
 }
 
-pub fn update_scores(scores: Res<Scores>, mut query: Query<(&mut Text, &ScoreboardUi)>) {
+pub fn draw_scores(scores: Res<Scores>, mut query: Query<(&mut Text, &ScoreboardUi)>) {
     for (mut score, scoreboard) in &mut query {
         match scoreboard.0 {
             Player::A => {
@@ -349,18 +345,19 @@ pub fn play_collision_sound(
 pub fn setup_match(
     mut scores: ResMut<Scores>,
     mut match_: ResMut<Match>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut next_state: ResMut<NextState<RoundState>>,
 ) {
-    // reset scores, round count
+    info!("IN setup_match");
     let mut a = scores.a;
     a = 0;
     let mut b = scores.b;
     b = 0;
     let mut count = match_.round_count;
     count = 0;
-    next_state.set(GameState::Round);
+    next_state.set(RoundState::In);
 }
 
+// OnEnter Round::In
 pub fn setup_round(
     mut commands: Commands,
     mut query: Query<(
@@ -371,11 +368,12 @@ pub fn setup_round(
         Option<&Paddle>,
     )>,
 ) {
+    println!("IN setup_round");
     for (mut transform, mut velocity, player, ball, paddle) in query.iter_mut() {
         if ball.is_some() {
-            // let (ball_entity, mut ball_transform, mut ball_velocity) = ball_query.single_mut();
-            let mut translation = transform.translation;
-            translation = BALL_START_POSITION;
+            // ! ball is not resetting
+            println!("found ball cpts to mutate",);
+            transform.translation = BALL_START_POSITION;
             *velocity = Velocity(rand_ball_dir() * BALL_START_SPEED);
         } else if paddle.is_some() {
             if let Some(player) = player {
@@ -391,30 +389,90 @@ pub fn setup_round(
             }
         }
     }
-
-    // // ? &mut
-    // for (mut paddle_transform, paddle) in paddle_query.iter_mut() {
-    //     let mut translation = paddle_transform.translation;
-    //     match paddle.0 {
-    //         Player::A => {
-    //             translation = PADDLE_A_START_VEC;
-    //         }
-    //         Player::B => {
-    //             translation = PADDLE_B_START_VEC;
-    //         }
-    //     }
-    // }
 }
 
-pub fn end_round() {
+pub fn between_rounds(
+    mut match_: ResMut<Match>,
+    mut next_state_round: ResMut<NextState<RoundState>>,
+    mut next_state_game: ResMut<NextState<GameState>>,
+) {
+    info!("IN end_round");
+
     // no input
     // show scorer
     // pause for 3 sec
 }
 
-pub fn end_match() {
+pub fn process_score(
+    mut scores: ResMut<Scores>,
+    mut next_state_round: ResMut<NextState<RoundState>>,
+    mut next_state_game: ResMut<NextState<GameState>>,
+    mut match_: ResMut<Match>,
+    mut score_events: EventReader<ScoreEvent>,
+) {
+    println!("process_score",);
+    // single expected event pattern
+    if !score_events.is_empty() {
+        println!("score_event!",);
+        let mut score_events: Vec<&ScoreEvent> = score_events.read().collect();
+
+        match score_events[0] {
+            ScoreEvent::A => {
+                let mut a = scores.a;
+                a += 1;
+            }
+            ScoreEvent::B => {
+                let mut b = scores.b;
+                b += 1;
+            }
+        }
+
+        next_state_round.set(RoundState::Scored);
+    }
+}
+
+// TODO
+pub fn run_scored_view(
+    mut next_state_round: ResMut<NextState<RoundState>>,
+    mut next_state_game: ResMut<NextState<GameState>>,
+    mut match_: ResMut<Match>,
+) {
+    println!("run_scored_view",);
+    // read score event
+    // draw winner text
+    // start timer
+
+    // on timer.finished, exec below
+    match_.round_count += 1;
+
+    if match_.round_count == match_.rounds_total {
+        // will use the Exit Gamestate::Match to display victory screen
+        next_state_round.set(RoundState::Out);
+        next_state_game.set(GameState::End);
+    } else {
+        next_state_round.set(RoundState::Countdown);
+    }
+}
+
+pub fn round_countdown(
+    mut next_state: ResMut<NextState<RoundState>>,
+    mut score_events: EventReader<ScoreEvent>,
+) {
+    println!("IN round_countdown",);
+    score_events.clear();
+    next_state.set(RoundState::In);
+}
+
+pub fn end_match(mut score_events: EventReader<ScoreEvent>) {
+    info!("IN end_match");
+    score_events.clear();
+
     // no input
     // show victor
     // pause for 3 sec
     // prompt for restart y/n
+}
+
+pub fn tick() {
+    println!("tick",);
 }
