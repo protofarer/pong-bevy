@@ -5,12 +5,12 @@ use bevy::{
 };
 
 use crate::{
-    Ball, Collider, CollisionEvent, CollisionSound, GameState, Goal, GoalBundle, GoalLocation,
-    Match, Paddle, Player, RoundState, ScoreEvent, ScoreboardUi, Scores, Velocity, Wall,
-    WallBundle, WallLocation, BALL_COLOR, BALL_R, BALL_START_POSITION, BALL_START_SPEED,
-    BOTTOM_WALL, GAP_BETWEEN_PADDLE_AND_BACKWALL, LEFT_WALL, PADDLE_A_START_VEC,
-    PADDLE_B_START_VEC, PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED, RIGHT_WALL, ROUNDS_TOTAL,
-    SCORE_COLOR, SCORE_FONT_SIZE, TOP_WALL, WALL_THICKNESS,
+    Ball, Collider, CollisionEvent, CollisionSound, GameState, GameTimer, Goal, GoalBundle,
+    GoalLocation, Match, OnEndScreen, OnScoredScreen, Paddle, Player, RoundState, ScoreEvent,
+    ScoreboardUi, Scores, Velocity, Wall, WallBundle, WallLocation, BALL_COLOR, BALL_R,
+    BALL_START_POSITION, BALL_START_SPEED, BOTTOM_WALL, GAP_BETWEEN_PADDLE_AND_BACKWALL, LEFT_WALL,
+    MESSAGE_COLOR, PADDLE_A_START_VEC, PADDLE_B_START_VEC, PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED,
+    RIGHT_WALL, ROUNDS_TOTAL, SCORE_COLOR, SCORE_FONT_SIZE, TOP_WALL, WALL_THICKNESS,
 };
 
 pub fn setup(
@@ -410,7 +410,6 @@ pub fn process_score(
     mut match_: ResMut<Match>,
     mut score_events: EventReader<ScoreEvent>,
 ) {
-    println!("process_score",);
     // single expected event pattern
     if !score_events.is_empty() {
         println!("score_event!",);
@@ -431,26 +430,79 @@ pub fn process_score(
     }
 }
 
-// TODO
+fn spawn_timed_message(mut commands: Commands, msg: &str, duration: f32, marker: impl Component) {
+    commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                ..default()
+            },
+            marker,
+        ))
+        .with_children(|parent| {
+            parent
+                .spawn(NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    // background_color: Color::GRAY.into(),
+                    ..default()
+                })
+                .with_children(|parent| {
+                    parent.spawn(
+                        TextBundle::from_section(
+                            msg,
+                            TextStyle {
+                                font_size: 40.0,
+                                color: MESSAGE_COLOR,
+                                ..default()
+                            },
+                        )
+                        .with_style(Style {
+                            margin: UiRect::all(Val::Px(50.0)),
+                            ..default()
+                        }),
+                    );
+                });
+        });
+    commands.insert_resource(GameTimer(Timer::from_seconds(duration, TimerMode::Once)));
+}
+
+pub fn setup_scored(mut commands: Commands<'_, '_>, mut score_events: EventReader<ScoreEvent>) {
+    let scorer = score_events.read().collect::<Vec<&ScoreEvent>>()[0];
+    let scorer_text = match scorer {
+        ScoreEvent::A => "A",
+        ScoreEvent::B => "B",
+    };
+    let message = format!("Player {} scores!", scorer_text);
+    spawn_timed_message(commands, &message, 2.0, OnScoredScreen);
+}
+
 pub fn run_scored_view(
     mut next_state_round: ResMut<NextState<RoundState>>,
     mut next_state_game: ResMut<NextState<GameState>>,
     mut match_: ResMut<Match>,
+    time: Res<Time>,
+    mut timer: ResMut<GameTimer>,
 ) {
-    println!("run_scored_view",);
-    // read score event
-    // draw winner text
-    // start timer
+    if timer.tick(time.delta()).finished() {
+        match_.round_count += 1;
 
-    // on timer.finished, exec below
-    match_.round_count += 1;
-
-    if match_.round_count == match_.rounds_total {
-        // will use the Exit Gamestate::Match to display victory screen
-        next_state_round.set(RoundState::Out);
-        next_state_game.set(GameState::End);
-    } else {
-        next_state_round.set(RoundState::Countdown);
+        if match_.round_count == match_.rounds_total {
+            // will use the Exit Gamestate::Match to display victory screen
+            next_state_round.set(RoundState::Out);
+            next_state_game.set(GameState::End);
+        } else {
+            next_state_round.set(RoundState::Countdown);
+        }
     }
 }
 
@@ -475,4 +527,31 @@ pub fn end_match(mut score_events: EventReader<ScoreEvent>) {
 
 pub fn tick() {
     println!("tick",);
+}
+
+pub fn despawn_screen<T: Component>(to_despawn: Query<Entity, With<T>>, mut commands: Commands) {
+    for entity in to_despawn.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
+pub fn setup_end(mut commands: Commands) {
+    // commands.insert_resource(GameTimer(Timer::from_seconds(5., TimerMode::Once)));
+    spawn_timed_message(commands, "match fin!", 1.0, OnEndScreen);
+}
+
+pub fn run_end(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut timer: ResMut<GameTimer>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if timer.tick(time.delta()).finished() {
+        info!("Match Ended. Auto-starting over");
+        next_state.set(GameState::Menu);
+    }
+}
+
+pub fn run_menu(mut next_state: ResMut<NextState<GameState>>) {
+    next_state.set(GameState::Match);
 }

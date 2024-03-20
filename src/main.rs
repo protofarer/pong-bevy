@@ -30,12 +30,13 @@ const SCORE_B_POSITION: Vec3 = Vec3::new(150., 200., 0.0);
 
 const SCORE_FONT_SIZE: f32 = 40.;
 
-const BACKGROUND_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
+const BACKGROUND_COLOR: Color = Color::rgb(0., 0., 0.);
 const PADDLE_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
 const BALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
 const WALL_COLOR: Color = Color::rgb(0.8, 0.8, 0.8);
 const GOAL_COLOR: Color = Color::rgb(0., 0., 0.8);
 const SCORE_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
+const MESSAGE_COLOR: Color = Color::rgb(0., 0., 0.9);
 
 const PADDLE_A_START_VEC: Vec3 = Vec3::new(LEFT_WALL + GAP_BETWEEN_PADDLE_AND_BACKWALL, 0., 0.);
 const PADDLE_B_START_VEC: Vec3 = Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_BACKWALL, 0., 0.);
@@ -53,7 +54,7 @@ impl Plugin for TheGamePlugin {
                 check_for_collisions,
                 play_collision_sound,
                 process_score,
-                tick,
+                // tick,
             )
                 .chain()
                 .in_set(PlaySet),
@@ -64,18 +65,23 @@ impl Plugin for TheGamePlugin {
                 (draw_scores, bevy::window::close_on_esc).in_set(PlaySet),
                 run_scored_view.run_if(in_state(RoundState::Scored)),
                 round_countdown.run_if(in_state(RoundState::Countdown)),
+                run_end.run_if(in_state(GameState::End)),
+                run_menu.run_if(in_state(GameState::Menu)),
             ),
         )
         .add_systems(OnEnter(GameState::Match), setup_match)
         .add_systems(OnEnter(RoundState::In), setup_round)
+        .add_systems(OnEnter(RoundState::Scored), setup_scored)
+        .add_systems(OnEnter(GameState::End), setup_end)
+        .add_systems(OnExit(RoundState::Scored), despawn_screen::<OnScoredScreen>)
+        .add_systems(OnExit(GameState::End), despawn_screen::<OnEndScreen>)
         .configure_sets(
             Update,
             (
-                MainMenuSet.run_if(in_state(GameState::MainMenu)),
+                MainMenuSet.run_if(in_state(GameState::Menu)),
                 PlaySet.run_if(in_state(RoundState::In)),
-                // (show_scorer, freeze_inputs, freeze_sim).run_if(in_state(RoundState::Scored))
+                // (run_scored, freeze_inputs, freeze_sim).run_if(in_state(RoundState::Scored))
                 // (countdown_round, freeze_inputs, freeze_sim).run_if(in_state(RoundState::Countdown))
-                // (show_final_score, freeze_inputs, freeze_sim).run_if(in_state(GameState::End))
             ),
         )
         .configure_sets(FixedUpdate, (PlaySet.run_if(in_state(RoundState::In)),))
@@ -98,7 +104,7 @@ fn main() {
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 enum GameState {
     #[default]
-    MainMenu,
+    Menu,
     Match,
     End,
 }
@@ -284,3 +290,12 @@ struct Match {
     round_count: usize,
     rounds_total: usize,
 }
+
+#[derive(Component)]
+struct OnScoredScreen;
+
+#[derive(Component)]
+struct OnEndScreen;
+
+#[derive(Resource, Deref, DerefMut)]
+struct GameTimer(Timer);
