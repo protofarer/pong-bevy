@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::{
     math::bounding::{Aabb2d, BoundingCircle, BoundingVolume, IntersectsVolume},
     prelude::*,
@@ -5,12 +7,13 @@ use bevy::{
 };
 
 use crate::{
-    Ball, Collider, CollisionEvent, CollisionSound, GameState, GameTimer, Goal, GoalBundle,
-    GoalLocation, Match, OnEndScreen, OnScoredScreen, Paddle, Player, RoundState, ScoreEvent,
-    ScoreboardUi, Scores, Velocity, Wall, WallBundle, WallLocation, BALL_COLOR, BALL_R,
-    BALL_START_POSITION, BALL_START_SPEED, BOTTOM_WALL, GAP_BETWEEN_PADDLE_AND_BACKWALL, LEFT_WALL,
-    MESSAGE_COLOR, PADDLE_A_START_VEC, PADDLE_B_START_VEC, PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED,
-    RIGHT_WALL, ROUNDS_TOTAL, SCORE_COLOR, SCORE_FONT_SIZE, TOP_WALL, WALL_THICKNESS,
+    Ball, Collider, CollisionEvent, CollisionSound, CountdownTimedMessage, GameState, GameTimer,
+    Goal, GoalBundle, GoalLocation, Match, OnCountdownScreen, OnEndScreen, OnScoredScreen, Paddle,
+    Player, RoundState, ScoreEvent, ScoreboardUi, Scores, Velocity, Wall, WallBundle, WallLocation,
+    BALL_COLOR, BALL_RADIUS, BALL_START_POSITION, BALL_START_SPEED, BOTTOM_WALL,
+    GAP_BETWEEN_PADDLE_AND_GOAL, LEFT_WALL, MESSAGE_COLOR, PADDLE_A_START_POSITION,
+    PADDLE_B_START_POSITION, PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED, RIGHT_WALL, ROUNDS_TOTAL,
+    SCORE_A_POSITION, SCORE_B_POSITION, SCORE_COLOR, SCORE_FONT_SIZE, TOP_WALL, WALL_THICKNESS,
 };
 
 pub fn setup(
@@ -41,7 +44,7 @@ pub fn setup(
         SpriteBundle {
             transform: Transform {
                 // translation: PADDLE_A_START_VEC,
-                translation: Vec3::new(LEFT_WALL + GAP_BETWEEN_PADDLE_AND_BACKWALL, 0., 0.),
+                translation: Vec3::new(LEFT_WALL + GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.),
                 scale: PADDLE_SIZE,
                 ..default()
             },
@@ -61,7 +64,7 @@ pub fn setup(
         SpriteBundle {
             transform: Transform {
                 // translation: PADDLE_B_START_VEC,
-                translation: Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_BACKWALL, 0., 0.),
+                translation: Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.),
                 scale: PADDLE_SIZE,
                 ..default()
             },
@@ -82,7 +85,7 @@ pub fn setup(
             mesh: meshes.add(Circle::default()).into(),
             material: materials.add(BALL_COLOR),
             transform: Transform::from_translation(BALL_START_POSITION)
-                .with_scale(Vec2::splat(BALL_R * 2.).extend(1.)),
+                .with_scale(Vec2::splat(BALL_RADIUS * 2.).extend(1.)),
             ..default()
         },
         Ball,
@@ -99,9 +102,11 @@ pub fn setup(
             ..default()
         })])
         .with_style(Style {
-            position_type: PositionType::Relative,
-            top: Val::Percent(10.),
-            left: Val::Percent(20.),
+            // position_type: PositionType::Relative,
+            // top: Val::Px(100.),
+            // left: Val::Percent(25.),
+            top: SCORE_A_POSITION.top,
+            left: SCORE_A_POSITION.left,
             ..default()
         }),
     ));
@@ -114,9 +119,9 @@ pub fn setup(
             ..default()
         })])
         .with_style(Style {
-            position_type: PositionType::Relative,
-            top: Val::Percent(10.),
-            left: Val::Percent(80.),
+            // position_type: PositionType::Relative,
+            top: SCORE_B_POSITION.top,
+            left: SCORE_B_POSITION.left,
             ..default()
         }),
     ));
@@ -135,6 +140,9 @@ pub fn move_paddle(
     time: Res<Time>,
 ) {
     for (mut transform, player) in query.iter_mut() {
+        let top_bound = TOP_WALL - WALL_THICKNESS / 2.0 - PADDLE_SIZE.y / 2.0;
+        let bottom_bound = BOTTOM_WALL + WALL_THICKNESS / 2.0 + PADDLE_SIZE.y / 2.0;
+
         match player {
             Player::A => {
                 let mut direction = 0.;
@@ -148,9 +156,6 @@ pub fn move_paddle(
 
                 let new_paddle_position =
                     transform.translation.y + direction * PADDLE_SPEED * time.delta_seconds();
-
-                let top_bound = TOP_WALL - WALL_THICKNESS / 2.0 - PADDLE_SIZE.y / 2.0;
-                let bottom_bound = BOTTOM_WALL + WALL_THICKNESS / 2.0 + PADDLE_SIZE.y / 2.0;
 
                 transform.translation.y = new_paddle_position.clamp(bottom_bound, top_bound);
             }
@@ -167,9 +172,6 @@ pub fn move_paddle(
                 let new_paddle_position =
                     transform.translation.y + direction * PADDLE_SPEED * time.delta_seconds();
 
-                let top_bound = TOP_WALL - WALL_THICKNESS / 2.0 - PADDLE_SIZE.y / 2.0;
-                let bottom_bound = BOTTOM_WALL + WALL_THICKNESS / 2.0 + PADDLE_SIZE.y / 2.0;
-
                 transform.translation.y = new_paddle_position.clamp(bottom_bound, top_bound);
             }
         }
@@ -184,19 +186,16 @@ pub fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<T
 }
 
 pub fn check_for_collisions(
-    mut commands: Commands,
-    mut scores: ResMut<Scores>,
-    mut ball_query: Query<(Entity, &mut Velocity, &Transform), With<Ball>>,
-    mut collider_query: Query<(Entity, &Transform, Option<&Goal>, Option<&Wall>), With<(Collider)>>,
+    mut ball_query: Query<(&mut Velocity, &Transform), With<Ball>>,
+    collider_query: Query<(&Transform, Option<&Goal>, Option<&Wall>), With<Collider>>,
     mut collision_events: EventWriter<CollisionEvent>,
     mut score_events: EventWriter<ScoreEvent>,
-    mut next_state: ResMut<NextState<RoundState>>,
 ) {
-    let (mut ball_entity, mut ball_velocity, ball_transform) = ball_query.single_mut();
+    let (mut ball_velocity, ball_transform) = ball_query.single_mut();
 
-    for (collider_entity, transform, goal, wall) in &collider_query {
+    for (transform, goal, wall) in &collider_query {
         let collision = collide_with_side(
-            BoundingCircle::new(ball_transform.translation.truncate(), BALL_R),
+            BoundingCircle::new(ball_transform.translation.truncate(), BALL_RADIUS),
             Aabb2d::new(
                 transform.translation.truncate(),
                 transform.scale.truncate() / 2.,
@@ -209,10 +208,12 @@ pub fn check_for_collisions(
 
                 match collision {
                     Collision::Right => {
-                        score_events.send(ScoreEvent::A);
+                        println!("FIRING SCORE EVENT for B",);
+                        score_events.send(ScoreEvent::B);
                     }
                     Collision::Left => {
-                        score_events.send(ScoreEvent::B);
+                        println!("FIRING SCORE EVENT for A",);
+                        score_events.send(ScoreEvent::A);
                     }
                     _ => {}
                 }
@@ -241,7 +242,6 @@ pub fn check_for_collisions(
                     Collision::Right => reflect_x = ball_velocity.x < 0.,
                     Collision::Top => reflect_y = ball_velocity.y < 0.,
                     Collision::Bottom => reflect_y = ball_velocity.y > 0.,
-                    _ => {}
                 }
 
                 if reflect_y {
@@ -293,7 +293,7 @@ pub fn collide_with_side(ball: BoundingCircle, boundary: Aabb2d) -> Option<Colli
     Some(side)
 }
 
-pub fn draw_scores(scores: Res<Scores>, mut query: Query<(&mut Text, &ScoreboardUi)>) {
+pub fn update_score_ui(scores: Res<Scores>, mut query: Query<(&mut Text, &ScoreboardUi)>) {
     for (mut score, scoreboard) in &mut query {
         match scoreboard.0 {
             Player::A => {
@@ -348,81 +348,34 @@ pub fn setup_match(
     mut next_state: ResMut<NextState<RoundState>>,
 ) {
     info!("IN setup_match");
-    let mut a = scores.a;
-    a = 0;
-    let mut b = scores.b;
-    b = 0;
-    let mut count = match_.round_count;
-    count = 0;
-    next_state.set(RoundState::In);
+    scores.a = 0;
+    scores.b = 0;
+    match_.round_count = 0;
+    next_state.set(RoundState::Countdown);
 }
 
-// OnEnter Round::In
-pub fn setup_round(
-    mut commands: Commands,
-    mut query: Query<(
-        &mut Transform,
-        &mut Velocity,
-        Option<&Player>,
-        Option<&Ball>,
-        Option<&Paddle>,
-    )>,
-) {
-    println!("IN setup_round");
-    for (mut transform, mut velocity, player, ball, paddle) in query.iter_mut() {
-        if ball.is_some() {
-            // ! ball is not resetting
-            println!("found ball cpts to mutate",);
-            transform.translation = BALL_START_POSITION;
-            *velocity = Velocity(rand_ball_dir() * BALL_START_SPEED);
-        } else if paddle.is_some() {
-            if let Some(player) = player {
-                let mut translation = transform.translation;
-                match player {
-                    Player::A => {
-                        translation = PADDLE_A_START_VEC;
-                    }
-                    Player::B => {
-                        translation = PADDLE_B_START_VEC;
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub fn between_rounds(
-    mut match_: ResMut<Match>,
-    mut next_state_round: ResMut<NextState<RoundState>>,
-    mut next_state_game: ResMut<NextState<GameState>>,
-) {
-    info!("IN end_round");
-
-    // no input
-    // show scorer
-    // pause for 3 sec
-}
+// pub fn setup_round() {}
 
 pub fn process_score(
     mut scores: ResMut<Scores>,
     mut next_state_round: ResMut<NextState<RoundState>>,
-    mut next_state_game: ResMut<NextState<GameState>>,
-    mut match_: ResMut<Match>,
     mut score_events: EventReader<ScoreEvent>,
 ) {
     // single expected event pattern
     if !score_events.is_empty() {
         println!("score_event!",);
-        let mut score_events: Vec<&ScoreEvent> = score_events.read().collect();
+        let score_events: Vec<&ScoreEvent> = score_events.read().collect();
 
         match score_events[0] {
             ScoreEvent::A => {
-                let mut a = scores.a;
-                a += 1;
+                // let mut a = scores.a;
+                // a += 1;
+                scores.a += 1;
             }
             ScoreEvent::B => {
-                let mut b = scores.b;
-                b += 1;
+                // let mut b = scores.b;
+                // b += 1;
+                scores.b += 1;
             }
         }
 
@@ -430,14 +383,24 @@ pub fn process_score(
     }
 }
 
-fn spawn_timed_message(mut commands: Commands, msg: &str, duration: f32, marker: impl Component) {
+// ? pass an instanced Bundle or Bundle Constructor that accepts a msg, aka the UI entity and its components
+fn spawn_timed_message(
+    mut commands: Commands,
+    msg: &str,
+    duration: f32,
+    marker: impl Component + Clone,
+) {
     commands
         .spawn((
             NodeBundle {
                 style: Style {
                     width: Val::Percent(100.0),
                     height: Val::Percent(100.0),
-                    align_items: AlignItems::Center,
+                    padding: UiRect {
+                        top: Val::Px(50.),
+                        ..default()
+                    },
+                    // align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                     ..default()
                 },
@@ -447,7 +410,7 @@ fn spawn_timed_message(mut commands: Commands, msg: &str, duration: f32, marker:
         ))
         .with_children(|parent| {
             parent
-                .spawn(NodeBundle {
+                .spawn((NodeBundle {
                     style: Style {
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
@@ -455,93 +418,42 @@ fn spawn_timed_message(mut commands: Commands, msg: &str, duration: f32, marker:
                     },
                     // background_color: Color::GRAY.into(),
                     ..default()
-                })
+                },))
                 .with_children(|parent| {
-                    parent.spawn(
-                        TextBundle::from_section(
-                            msg,
-                            TextStyle {
-                                font_size: 40.0,
-                                color: MESSAGE_COLOR,
-                                ..default()
-                            },
-                        )
-                        .with_style(Style {
-                            margin: UiRect::all(Val::Px(50.0)),
+                    parent.spawn((TextBundle::from_section(
+                        msg,
+                        TextStyle {
+                            font_size: 40.0,
+                            color: MESSAGE_COLOR,
                             ..default()
-                        }),
-                    );
+                        },
+                    )
+                    .with_style(Style {
+                        margin: UiRect::all(Val::Px(50.0)),
+                        ..default()
+                    }),));
                 });
         });
     commands.insert_resource(GameTimer(Timer::from_seconds(duration, TimerMode::Once)));
 }
 
-pub fn setup_scored(mut commands: Commands<'_, '_>, mut score_events: EventReader<ScoreEvent>) {
-    let scorer = score_events.read().collect::<Vec<&ScoreEvent>>()[0];
-    let scorer_text = match scorer {
-        ScoreEvent::A => "A",
-        ScoreEvent::B => "B",
-    };
-    let message = format!("Player {} scores!", scorer_text);
-    spawn_timed_message(commands, &message, 2.0, OnScoredScreen);
-}
-
-pub fn run_scored_view(
-    mut next_state_round: ResMut<NextState<RoundState>>,
-    mut next_state_game: ResMut<NextState<GameState>>,
-    mut match_: ResMut<Match>,
-    time: Res<Time>,
-    mut timer: ResMut<GameTimer>,
-) {
-    if timer.tick(time.delta()).finished() {
-        match_.round_count += 1;
-
-        if match_.round_count == match_.rounds_total {
-            // will use the Exit Gamestate::Match to display victory screen
-            next_state_round.set(RoundState::Out);
-            next_state_game.set(GameState::End);
-        } else {
-            next_state_round.set(RoundState::Countdown);
-        }
-    }
-}
-
-pub fn round_countdown(
-    mut next_state: ResMut<NextState<RoundState>>,
-    mut score_events: EventReader<ScoreEvent>,
-) {
-    println!("IN round_countdown",);
-    score_events.clear();
-    next_state.set(RoundState::In);
-}
-
-pub fn end_match(mut score_events: EventReader<ScoreEvent>) {
-    info!("IN end_match");
-    score_events.clear();
-
-    // no input
-    // show victor
-    // pause for 3 sec
-    // prompt for restart y/n
-}
-
-pub fn tick() {
-    println!("tick",);
-}
+// pub fn tick() {
+//     println!("tick",);
+// }
 
 pub fn despawn_screen<T: Component>(to_despawn: Query<Entity, With<T>>, mut commands: Commands) {
     for entity in to_despawn.iter() {
+        // println!("despawning entity {:?}", entity);
         commands.entity(entity).despawn_recursive();
     }
 }
 
-pub fn setup_end(mut commands: Commands) {
+pub fn setup_end(commands: Commands) {
     // commands.insert_resource(GameTimer(Timer::from_seconds(5., TimerMode::Once)));
     spawn_timed_message(commands, "match fin!", 1.0, OnEndScreen);
 }
 
 pub fn run_end(
-    mut commands: Commands,
     time: Res<Time>,
     mut timer: ResMut<GameTimer>,
     mut next_state: ResMut<NextState<GameState>>,
@@ -554,4 +466,173 @@ pub fn run_end(
 
 pub fn run_menu(mut next_state: ResMut<NextState<GameState>>) {
     next_state.set(GameState::Match);
+}
+
+pub fn setup_scored(commands: Commands, mut score_events: EventReader<ScoreEvent>) {
+    let scorer = score_events.read().collect::<Vec<&ScoreEvent>>()[0];
+    let scorer_text = match scorer {
+        ScoreEvent::A => "A",
+        ScoreEvent::B => "B",
+    };
+    let message = format!("Player {} scores!", scorer_text);
+    spawn_timed_message(commands, &message, 2.0, OnScoredScreen);
+}
+
+pub fn run_scored(
+    mut next_state_round: ResMut<NextState<RoundState>>,
+    mut next_state_game: ResMut<NextState<GameState>>,
+    mut match_: ResMut<Match>,
+    time: Res<Time>,
+    mut timer: ResMut<GameTimer>,
+    mut score_events: EventReader<ScoreEvent>,
+) {
+    if timer.tick(time.delta()).finished() {
+        score_events.clear();
+
+        match_.round_count += 1;
+        println!("match round count {}", match_.round_count);
+        println!("match round total {}", match_.rounds_total);
+
+        if match_.round_count == match_.rounds_total {
+            // will use the Exit Gamestate::Match to display victory screen
+            next_state_round.set(RoundState::Out);
+            next_state_game.set(GameState::End);
+        } else {
+            next_state_round.set(RoundState::Countdown);
+        }
+    }
+}
+
+pub fn setup_countdown(
+    mut q_ball: Query<(&mut Transform, &mut Velocity), (With<Ball>, Without<Paddle>)>,
+    mut q_paddle: Query<(&mut Transform, &Player), With<Paddle>>,
+    mut commands: Commands,
+) {
+    println!("run setup_countdown",);
+    let (mut ball_transform, mut ball_velocity) = q_ball.single_mut();
+    ball_transform.translation = BALL_START_POSITION;
+    *ball_velocity = Velocity(rand_ball_dir() * BALL_START_SPEED);
+
+    for (mut paddle_transform, player) in q_paddle.iter_mut() {
+        match player {
+            Player::A => {
+                paddle_transform.translation = PADDLE_A_START_POSITION;
+            }
+            Player::B => {
+                paddle_transform.translation = PADDLE_B_START_POSITION;
+            }
+        }
+    }
+
+    // for (mut transform, mut velocity, player, ball, _paddle) in query.iter_mut() {
+    //     if ball.is_some() {
+    //         transform.translation = BALL_START_POSITION;
+    //         *velocity = Velocity(rand_ball_dir() * BALL_START_SPEED);
+    //     } else {
+    //         // if paddle.is_some()
+    //         info!("WE NEVVAA GET HEREEEE!");
+    //         if let Some(player) = player {
+    //             // let mut translation = transform.translation;
+    //             match player {
+    //                 Player::A => {
+    //                     transform.translation = PADDLE_A_START_POSITION;
+    //                 }
+    //                 Player::B => {
+    //                     transform.translation = PADDLE_B_START_POSITION;
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
+    let texts: [String; 4] = [
+        "3..".to_string(),
+        "2..".to_string(),
+        "1..".to_string(),
+        "Go!".to_string(),
+    ];
+
+    let init_text = texts[0].clone();
+
+    commands.spawn((
+        CountdownTimedMessage {
+            timer: Timer::new(Duration::from_millis(300), TimerMode::Repeating),
+            texts,
+            cursor: 0,
+        },
+        OnCountdownScreen,
+    ));
+
+    let base_id = commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    // align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                ..default()
+            },
+            OnCountdownScreen,
+        ))
+        .id();
+    commands.entity(base_id).with_children(|parent| {
+        parent
+            .spawn((NodeBundle {
+                style: Style {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    padding: UiRect {
+                        top: Val::Px(50.),
+                        ..default()
+                    },
+                    ..default()
+                },
+                // background_color: Color::GRAY.into(),
+                ..default()
+            },))
+            .with_children(|parent| {
+                parent.spawn((TextBundle::from_section(
+                    init_text,
+                    TextStyle {
+                        font_size: 40.0,
+                        color: MESSAGE_COLOR,
+                        ..default()
+                    },
+                )
+                .with_style(Style {
+                    margin: UiRect::all(Val::Px(50.0)),
+                    ..default()
+                }),));
+            });
+    });
+    // println!("countdown_ui_entity: {:?}", base_id);
+}
+
+pub fn run_countdown(
+    mut q_ui_node: Query<&mut Node, With<OnCountdownScreen>>,
+    mut q_ui_text: Query<(&Parent, &mut Text)>,
+    mut query_countdown: Query<&mut CountdownTimedMessage>,
+    mut commands: Commands,
+    time: Res<Time>,
+    mut next_state: ResMut<NextState<RoundState>>,
+) {
+    let mut countdowner = query_countdown.single_mut();
+
+    countdowner.timer.tick(time.delta());
+
+    if countdowner.timer.finished() {
+        countdowner.cursor += 1;
+        if countdowner.cursor == 3 {
+            next_state.set(RoundState::In);
+            countdowner.cursor = 0;
+            return;
+        }
+        let result = q_ui_text.get_single_mut();
+        if let Ok((parent, mut text)) = result {
+            text.sections[0].value = countdowner.texts[countdowner.cursor].clone();
+        }
+    }
 }

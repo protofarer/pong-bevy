@@ -1,20 +1,16 @@
-#![allow(unused)]
+// #![allow(unused)]
 
-use bevy::{
-    // math::bounding::{Aabb2d, BoundingCircle, BoundingVolume, IntersectsVolume},
-    prelude::*,
-    // sprite::MaterialMesh2dBundle,
-};
+use bevy::prelude::*;
 use systems::*;
 
 mod systems;
 
 const PADDLE_SIZE: Vec3 = Vec3::new(20., 150., 0.0);
-const GAP_BETWEEN_PADDLE_AND_BACKWALL: f32 = 60.0;
+const GAP_BETWEEN_PADDLE_AND_GOAL: f32 = 60.0;
 const PADDLE_SPEED: f32 = 500.;
 
 const BALL_START_POSITION: Vec3 = Vec3::new(0., 0., 1.);
-const BALL_R: f32 = 15.;
+const BALL_RADIUS: f32 = 15.;
 const BALL_START_SPEED: f32 = 800.;
 
 const WALL_THICKNESS: f32 = 10.;
@@ -25,21 +21,35 @@ const TOP_WALL: f32 = 300.;
 
 const GOAL_THICKNESS: f32 = 3.;
 
-const SCORE_A_POSITION: Vec3 = Vec3::new(-150., 200., 0.0);
-const SCORE_B_POSITION: Vec3 = Vec3::new(150., 200., 0.0);
+struct ScorePosition {
+    top: Val,
+    left: Val,
+}
+
+const SCORE_POSITION_TOP: Val = Val::Px(100.);
+
+const SCORE_A_POSITION: ScorePosition = ScorePosition {
+    top: SCORE_POSITION_TOP,
+    left: Val::Percent(25.),
+};
+
+const SCORE_B_POSITION: ScorePosition = ScorePosition {
+    top: SCORE_POSITION_TOP,
+    left: Val::Percent(75.),
+};
 
 const SCORE_FONT_SIZE: f32 = 40.;
 
 const BACKGROUND_COLOR: Color = Color::rgb(0., 0., 0.);
-const PADDLE_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
-const BALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
-const WALL_COLOR: Color = Color::rgb(0.8, 0.8, 0.8);
-const GOAL_COLOR: Color = Color::rgb(0., 0., 0.8);
-const SCORE_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
-const MESSAGE_COLOR: Color = Color::rgb(0., 0., 0.9);
+const WALL_COLOR: Color = Color::rgb(1., 1., 1.);
+const BALL_COLOR: Color = Color::rgb(1., 1., 1.);
+const PADDLE_COLOR: Color = Color::rgb(1., 1., 1.);
+const GOAL_COLOR: Color = Color::rgb(1., 1., 1.);
+const SCORE_COLOR: Color = Color::rgb(0., 1., 0.);
+const MESSAGE_COLOR: Color = Color::rgb(0., 1., 0.);
 
-const PADDLE_A_START_VEC: Vec3 = Vec3::new(LEFT_WALL + GAP_BETWEEN_PADDLE_AND_BACKWALL, 0., 0.);
-const PADDLE_B_START_VEC: Vec3 = Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_BACKWALL, 0., 0.);
+const PADDLE_A_START_POSITION: Vec3 = Vec3::new(LEFT_WALL + GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.);
+const PADDLE_B_START_POSITION: Vec3 = Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.);
 
 const ROUNDS_TOTAL: usize = 2;
 
@@ -62,26 +72,32 @@ impl Plugin for TheGamePlugin {
         .add_systems(
             Update,
             (
-                (draw_scores, bevy::window::close_on_esc).in_set(PlaySet),
-                run_scored_view.run_if(in_state(RoundState::Scored)),
-                round_countdown.run_if(in_state(RoundState::Countdown)),
+                (run_scored).run_if(in_state(RoundState::Scored)),
+                run_countdown.run_if(in_state(RoundState::Countdown)),
                 run_end.run_if(in_state(GameState::End)),
+                (update_score_ui, bevy::window::close_on_esc).in_set(MatchSet),
                 run_menu.run_if(in_state(GameState::Menu)),
             ),
         )
         .add_systems(OnEnter(GameState::Match), setup_match)
-        .add_systems(OnEnter(RoundState::In), setup_round)
-        .add_systems(OnEnter(RoundState::Scored), setup_scored)
         .add_systems(OnEnter(GameState::End), setup_end)
-        .add_systems(OnExit(RoundState::Scored), despawn_screen::<OnScoredScreen>)
+        .add_systems(OnEnter(RoundState::Scored), setup_scored)
+        .add_systems(OnEnter(RoundState::Countdown), setup_countdown)
         .add_systems(OnExit(GameState::End), despawn_screen::<OnEndScreen>)
+        .add_systems(OnExit(RoundState::Scored), despawn_screen::<OnScoredScreen>)
+        .add_systems(
+            OnExit(RoundState::Countdown),
+            move |to_despawn: Query<Entity, With<OnCountdownScreen>>, cmd: Commands| {
+                println!("IN despawn countdown",);
+                despawn_screen::<OnCountdownScreen>(to_despawn, cmd);
+            },
+        )
         .configure_sets(
             Update,
             (
                 MainMenuSet.run_if(in_state(GameState::Menu)),
                 PlaySet.run_if(in_state(RoundState::In)),
-                // (run_scored, freeze_inputs, freeze_sim).run_if(in_state(RoundState::Scored))
-                // (countdown_round, freeze_inputs, freeze_sim).run_if(in_state(RoundState::Countdown))
+                MatchSet.run_if(in_state(GameState::Match)),
             ),
         )
         .configure_sets(FixedUpdate, (PlaySet.run_if(in_state(RoundState::In)),))
@@ -123,6 +139,9 @@ struct MainMenuSet;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlaySet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+struct MatchSet;
 
 #[derive(Component)]
 enum Player {
@@ -185,9 +204,7 @@ impl WallLocation {
         }
     }
     fn size(&self) -> Vec2 {
-        let arena_height = TOP_WALL - BOTTOM_WALL;
         let arena_width = RIGHT_WALL - LEFT_WALL;
-        assert!(arena_height > 0.);
         assert!(arena_width > 0.);
 
         match self {
@@ -243,9 +260,7 @@ impl GoalLocation {
     }
     fn size(&self) -> Vec2 {
         let arena_height = TOP_WALL - BOTTOM_WALL;
-        let arena_width = RIGHT_WALL - LEFT_WALL;
         assert!(arena_height > 0.);
-        assert!(arena_width > 0.);
 
         match self {
             GoalLocation::Left | GoalLocation::Right => {
@@ -291,11 +306,21 @@ struct Match {
     rounds_total: usize,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct OnScoredScreen;
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct OnEndScreen;
+
+#[derive(Component)]
+struct OnCountdownScreen;
 
 #[derive(Resource, Deref, DerefMut)]
 struct GameTimer(Timer);
+
+#[derive(Component)]
+struct CountdownTimedMessage {
+    timer: Timer,
+    texts: [String; 4],
+    cursor: usize,
+}
