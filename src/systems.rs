@@ -9,30 +9,22 @@ use bevy::{
 use bevy_vector_shapes::prelude::*;
 
 use crate::{
-    Ball, Collider, CollisionEvent, CollisionSound, CountdownTimedMessage, GameState, GameTimer,
-    Goal, GoalBundle, GoalLocation, Match, OnCountdownScreen, OnEndScreen, OnScoredScreen, Paddle,
-    Player, RoundState, ScoreEvent, ScoreboardUi, Scores, Velocity, Wall, WallBundle, WallLocation,
-    BALL_COLOR, BALL_RADIUS, BALL_START_POSITION, BALL_START_SPEED, BOTTOM_WALL,
-    GAP_BETWEEN_PADDLE_AND_GOAL, LEFT_WALL, MESSAGE_COLOR, PADDLE_A_START_POSITION,
+    Ball, Collider, CollisionEvent, CollisionSound,  GameState, GameTimer,
+    Goal, GoalBundle, GoalLocation, MatchInfo, OnEndScreen, OnMatchView,
+    OnScoredScreen, Paddle, Player, RoundState, ScoreEvent, ScoreboardUi, Scores, Velocity, Wall,
+    WallBundle, WallLocation, BALL_COLOR, BALL_RADIUS, BALL_START_POSITION, BALL_START_SPEED,
+    BOTTOM_WALL, GAP_BETWEEN_PADDLE_AND_GOAL, LEFT_WALL, PADDLE_A_START_POSITION,
     PADDLE_B_START_POSITION, PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED, RIGHT_WALL, ROUNDS_TOTAL,
-    SCORE_A_POSITION, SCORE_B_POSITION, SCORE_COLOR, SCORE_FONT_SIZE, TOP_WALL, WALL_THICKNESS,
+    SCORE_A_POSITION, SCORE_B_POSITION, SCORE_COLOR, SCORE_FONT_SIZE, TEXT_COLOR, TOP_WALL,
+    WALL_THICKNESS,
 };
 
 pub fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     commands.spawn(Camera2dBundle::default());
-    // commands.spawn(Camera2dBundle {
-    //     projection: OrthographicProjection {
-    //         scaling_mode: ScalingMode::WindowSize(1.),
-    //         ..default()
-    //     },
-    //     ..default()
-    // });
 
     let wall_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
     let paddle_collision_sound = asset_server.load("sounds/med_shoot.wav");
@@ -43,104 +35,12 @@ pub fn setup(
         goal: goal_collision_sound,
     });
     commands.insert_resource(Scores { a: 0, b: 0 });
-    commands.insert_resource(Match {
+    commands.insert_resource(MatchInfo {
         round_count: 0,
         rounds_total: ROUNDS_TOTAL,
     });
 
-    // Paddle A
-    commands.spawn((
-        SpriteBundle {
-            transform: Transform {
-                // translation: PADDLE_A_START_VEC,
-                translation: Vec3::new(LEFT_WALL + GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.),
-                scale: PADDLE_SIZE,
-                ..default()
-            },
-            sprite: Sprite {
-                color: PADDLE_COLOR,
-                ..default()
-            },
-            ..default()
-        },
-        Paddle,
-        Player::A,
-        Collider,
-    ));
-
-    // Paddle B
-    commands.spawn((
-        SpriteBundle {
-            transform: Transform {
-                // translation: PADDLE_B_START_VEC,
-                translation: Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.),
-                scale: PADDLE_SIZE,
-                ..default()
-            },
-            sprite: Sprite {
-                color: PADDLE_COLOR,
-                ..default()
-            },
-            ..default()
-        },
-        Paddle,
-        Player::B,
-        Collider,
-    ));
-
-    // Ball
-    commands.spawn((
-        MaterialMesh2dBundle {
-            mesh: meshes.add(Circle::default()).into(),
-            material: materials.add(BALL_COLOR),
-            transform: Transform::from_translation(BALL_START_POSITION)
-                .with_scale(Vec2::splat(BALL_RADIUS * 2.).extend(1.)),
-            ..default()
-        },
-        Ball,
-        Velocity(rand_ball_dir() * BALL_START_SPEED),
-    ));
-
-    // Scores
-    // A
-    commands.spawn((
-        ScoreboardUi(Player::A),
-        TextBundle::from_sections([TextSection::from_style(TextStyle {
-            font_size: SCORE_FONT_SIZE,
-            color: SCORE_COLOR,
-            ..default()
-        })])
-        .with_style(Style {
-            // position_type: PositionType::Relative,
-            // top: Val::Px(100.),
-            // left: Val::Percent(25.),
-            top: SCORE_A_POSITION.top,
-            left: SCORE_A_POSITION.left,
-            ..default()
-        }),
-    ));
-    // B
-    commands.spawn((
-        ScoreboardUi(Player::B),
-        TextBundle::from_sections([TextSection::from_style(TextStyle {
-            font_size: SCORE_FONT_SIZE,
-            color: SCORE_COLOR,
-            ..default()
-        })])
-        .with_style(Style {
-            // position_type: PositionType::Relative,
-            top: SCORE_B_POSITION.top,
-            left: SCORE_B_POSITION.left,
-            ..default()
-        }),
-    ));
-
-    commands.spawn(WallBundle::new(WallLocation::Bottom));
-    commands.spawn(WallBundle::new(WallLocation::Top));
-    commands.spawn(GoalBundle::new(GoalLocation::Left));
-    commands.spawn(GoalBundle::new(GoalLocation::Right));
-
-    next_state.set(GameState::Match);
+    next_state.set(GameState::Menu);
 }
 
 pub fn move_paddle(
@@ -263,7 +163,7 @@ pub fn check_for_collisions(
     }
 }
 
-fn rand_ball_dir() -> Vec2 {
+pub fn rand_ball_dir() -> Vec2 {
     // up-left hits paddle
     // Vec2::new(-0.5, 0.8)
     // down-left misses paddle
@@ -349,20 +249,118 @@ pub fn play_collision_sound(
     }
 }
 
+pub fn setup_menu(mut commands: Commands) {}
+
 pub fn setup_match(
     mut scores: ResMut<Scores>,
-    mut match_: ResMut<Match>,
+    mut match_: ResMut<MatchInfo>,
     mut next_state: ResMut<NextState<RoundState>>,
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     info!("IN setup_match");
     scores.a = 0;
     scores.b = 0;
     match_.round_count = 0;
+
+    // Paddle A
+    commands.spawn((
+        SpriteBundle {
+            transform: Transform {
+                translation: Vec3::new(LEFT_WALL + GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.),
+                scale: PADDLE_SIZE,
+                ..default()
+            },
+            sprite: Sprite {
+                color: PADDLE_COLOR,
+                ..default()
+            },
+            ..default()
+        },
+        Paddle,
+        Player::A,
+        Collider,
+        OnMatchView,
+    ));
+
+    // Paddle B
+    commands.spawn((
+        SpriteBundle {
+            transform: Transform {
+                translation: Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.),
+                scale: PADDLE_SIZE,
+                ..default()
+            },
+            sprite: Sprite {
+                color: PADDLE_COLOR,
+                ..default()
+            },
+            ..default()
+        },
+        Paddle,
+        Player::B,
+        Collider,
+        OnMatchView,
+    ));
+
+    // Ball
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: meshes.add(Circle::default()).into(),
+            material: materials.add(BALL_COLOR),
+            transform: Transform::from_translation(BALL_START_POSITION)
+                .with_scale(Vec2::splat(BALL_RADIUS * 2.).extend(1.)),
+            ..default()
+        },
+        Ball,
+        Velocity(rand_ball_dir() * BALL_START_SPEED),
+        OnMatchView,
+    ));
+
+    // Scores
+    // A
+    commands.spawn((
+        ScoreboardUi(Player::A),
+        TextBundle::from_sections([TextSection::from_style(TextStyle {
+            font_size: SCORE_FONT_SIZE,
+            color: SCORE_COLOR,
+            ..default()
+        })])
+        .with_style(Style {
+            // position_type: PositionType::Relative,
+            // top: Val::Px(100.),
+            // left: Val::Percent(25.),
+            top: SCORE_A_POSITION.top,
+            left: SCORE_A_POSITION.left,
+            ..default()
+        }),
+        OnMatchView,
+    ));
+    // B
+    commands.spawn((
+        ScoreboardUi(Player::B),
+        TextBundle::from_sections([TextSection::from_style(TextStyle {
+            font_size: SCORE_FONT_SIZE,
+            color: SCORE_COLOR,
+            ..default()
+        })])
+        .with_style(Style {
+            // position_type: PositionType::Relative,
+            top: SCORE_B_POSITION.top,
+            left: SCORE_B_POSITION.left,
+            ..default()
+        }),
+        OnMatchView,
+    ));
+
+    commands.spawn((WallBundle::new(WallLocation::Bottom), OnMatchView));
+    commands.spawn((WallBundle::new(WallLocation::Top), OnMatchView));
+    commands.spawn((GoalBundle::new(GoalLocation::Left), OnMatchView));
+    commands.spawn((GoalBundle::new(GoalLocation::Right), OnMatchView));
+
     next_state.set(RoundState::Countdown);
 }
-
-// pub fn setup_round() {}
 
 pub fn process_score(
     mut scores: ResMut<Scores>,
@@ -432,7 +430,7 @@ fn spawn_timed_message(
                         msg,
                         TextStyle {
                             font_size: 40.0,
-                            color: MESSAGE_COLOR,
+                            color: TEXT_COLOR,
                             ..default()
                         },
                     )
@@ -472,10 +470,6 @@ pub fn run_end(
     }
 }
 
-pub fn run_menu(mut next_state: ResMut<NextState<GameState>>) {
-    next_state.set(GameState::Match);
-}
-
 pub fn setup_scored(commands: Commands, mut score_events: EventReader<ScoreEvent>) {
     let scorer = score_events.read().collect::<Vec<&ScoreEvent>>()[0];
     let scorer_text = match scorer {
@@ -489,7 +483,7 @@ pub fn setup_scored(commands: Commands, mut score_events: EventReader<ScoreEvent
 pub fn run_scored(
     mut next_state_round: ResMut<NextState<RoundState>>,
     mut next_state_game: ResMut<NextState<GameState>>,
-    mut match_: ResMut<Match>,
+    mut match_: ResMut<MatchInfo>,
     time: Res<Time>,
     mut timer: ResMut<GameTimer>,
     mut score_events: EventReader<ScoreEvent>,
@@ -506,136 +500,6 @@ pub fn run_scored(
             next_state_game.set(GameState::End);
         } else {
             next_state_round.set(RoundState::Countdown);
-        }
-    }
-}
-
-pub fn setup_countdown(
-    mut q_ball: Query<(&mut Transform, &mut Velocity), (With<Ball>, Without<Paddle>)>,
-    mut q_paddle: Query<(&mut Transform, &Player), With<Paddle>>,
-    mut commands: Commands,
-) {
-    let (mut ball_transform, mut ball_velocity) = q_ball.single_mut();
-    ball_transform.translation = BALL_START_POSITION;
-    *ball_velocity = Velocity(rand_ball_dir() * BALL_START_SPEED);
-
-    for (mut paddle_transform, player) in q_paddle.iter_mut() {
-        match player {
-            Player::A => {
-                paddle_transform.translation = PADDLE_A_START_POSITION;
-            }
-            Player::B => {
-                paddle_transform.translation = PADDLE_B_START_POSITION;
-            }
-        }
-    }
-
-    // for (mut transform, mut velocity, player, ball, _paddle) in query.iter_mut() {
-    //     if ball.is_some() {
-    //         transform.translation = BALL_START_POSITION;
-    //         *velocity = Velocity(rand_ball_dir() * BALL_START_SPEED);
-    //     } else {
-    //         // if paddle.is_some()
-    //         info!("WE NEVVAA GET HEREEEE!");
-    //         if let Some(player) = player {
-    //             // let mut translation = transform.translation;
-    //             match player {
-    //                 Player::A => {
-    //                     transform.translation = PADDLE_A_START_POSITION;
-    //                 }
-    //                 Player::B => {
-    //                     transform.translation = PADDLE_B_START_POSITION;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    let texts: [String; 4] = [
-        "3..".to_string(),
-        "2..".to_string(),
-        "1..".to_string(),
-        "Go!".to_string(),
-    ];
-
-    let init_text = texts[0].clone();
-
-    commands.spawn((
-        CountdownTimedMessage {
-            timer: Timer::new(Duration::from_millis(300), TimerMode::Repeating),
-            texts,
-            cursor: 0,
-        },
-        OnCountdownScreen,
-    ));
-
-    let base_id = commands
-        .spawn((
-            NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    // align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                ..default()
-            },
-            OnCountdownScreen,
-        ))
-        .id();
-    commands.entity(base_id).with_children(|parent| {
-        parent
-            .spawn((NodeBundle {
-                style: Style {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    padding: UiRect {
-                        top: Val::Px(50.),
-                        ..default()
-                    },
-                    ..default()
-                },
-                // background_color: Color::GRAY.into(),
-                ..default()
-            },))
-            .with_children(|parent| {
-                parent.spawn((TextBundle::from_section(
-                    init_text,
-                    TextStyle {
-                        font_size: 40.0,
-                        color: MESSAGE_COLOR,
-                        ..default()
-                    },
-                )
-                .with_style(Style {
-                    margin: UiRect::all(Val::Px(50.0)),
-                    ..default()
-                }),));
-            });
-    });
-}
-
-pub fn run_countdown(
-    mut q_ui_text: Query<&mut Text>,
-    mut query_countdown: Query<&mut CountdownTimedMessage>,
-    time: Res<Time>,
-    mut next_state: ResMut<NextState<RoundState>>,
-) {
-    let mut countdowner = query_countdown.single_mut();
-
-    countdowner.timer.tick(time.delta());
-
-    if countdowner.timer.finished() {
-        countdowner.cursor += 1;
-        if countdowner.cursor == 3 {
-            next_state.set(RoundState::In);
-            countdowner.cursor = 0;
-            return;
-        }
-        let result = q_ui_text.get_single_mut();
-        if let Ok(mut text) = result {
-            text.sections[0].value = countdowner.texts[countdowner.cursor].clone();
         }
     }
 }

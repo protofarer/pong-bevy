@@ -2,10 +2,14 @@
 
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
 use bevy_vector_shapes::prelude::*;
+use countdown::*;
 use fps::{fps_counter_showhide, fps_text_update_system, setup_fps_counter};
+use menu::OnMenuScreen;
 use systems::*;
 
+mod countdown;
 mod fps;
+mod menu;
 mod systems;
 
 const PADDLE_SIZE: Vec3 = Vec3::new(20., 150., 0.0);
@@ -49,7 +53,7 @@ const BALL_COLOR: Color = Color::rgb(1., 1., 1.);
 const PADDLE_COLOR: Color = Color::rgb(1., 1., 1.);
 const GOAL_COLOR: Color = Color::rgb(1., 1., 1.);
 const SCORE_COLOR: Color = Color::rgb(0., 1., 0.);
-const MESSAGE_COLOR: Color = Color::rgb(0., 1., 0.);
+const TEXT_COLOR: Color = Color::rgb(0., 1., 0.);
 
 const PADDLE_A_START_POSITION: Vec3 = Vec3::new(LEFT_WALL + GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.);
 const PADDLE_B_START_POSITION: Vec3 = Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_AND_GOAL, 0., 0.);
@@ -58,20 +62,26 @@ const ROUNDS_TOTAL: usize = 2;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "bevy-pong".to_string(),
+        .add_plugins(
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "bevy-pong".to_string(),
+                    ..default()
+                }),
                 ..default()
-            }),
-            ..default()
-        }))
+            }), // .set(ImagePlugin::default_nearest()), // crisp pixels
+        )
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(Shape2dPlugin::default())
         .insert_resource(ClearColor(BACKGROUND_COLOR))
         .init_state::<GameState>()
         .init_state::<RoundState>()
         .add_systems(Startup, (setup, setup_fps_counter))
-        .add_plugins(TheGamePlugin)
+        .add_plugins((
+            TheGamePlugin,
+            menu::menu_plugin,
+            countdown::countdown_plugin,
+        ))
         .run();
 }
 
@@ -96,30 +106,20 @@ impl Plugin for TheGamePlugin {
             (
                 fps_text_update_system,
                 fps_counter_showhide,
-                (run_scored).run_if(in_state(RoundState::Scored)),
-                run_countdown.run_if(in_state(RoundState::Countdown)),
+                run_scored.run_if(in_state(RoundState::Scored)),
                 run_end.run_if(in_state(GameState::End)),
                 (update_score_ui, bevy::window::close_on_esc, run_match).in_set(MatchSet),
-                run_menu.run_if(in_state(GameState::Menu)),
             ),
         )
         .add_systems(OnEnter(GameState::Match), setup_match)
         .add_systems(OnEnter(GameState::End), setup_end)
         .add_systems(OnEnter(RoundState::Scored), setup_scored)
-        .add_systems(OnEnter(RoundState::Countdown), setup_countdown)
+        .add_systems(OnExit(GameState::Match), despawn_screen::<OnMatchView>)
         .add_systems(OnExit(GameState::End), despawn_screen::<OnEndScreen>)
         .add_systems(OnExit(RoundState::Scored), despawn_screen::<OnScoredScreen>)
-        .add_systems(
-            OnExit(RoundState::Countdown),
-            move |to_despawn: Query<Entity, With<OnCountdownScreen>>, cmd: Commands| {
-                println!("IN despawn countdown",);
-                despawn_screen::<OnCountdownScreen>(to_despawn, cmd);
-            },
-        )
         .configure_sets(
             Update,
             (
-                MainMenuSet.run_if(in_state(GameState::Menu)),
                 PlaySet.run_if(in_state(RoundState::In)),
                 MatchSet.run_if(in_state(GameState::Match)),
             ),
@@ -146,9 +146,6 @@ enum RoundState {
     Scored,
     Countdown,
 }
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-struct MainMenuSet;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct PlaySet;
@@ -314,10 +311,13 @@ struct Scores {
 struct ScoreboardUi(Player);
 
 #[derive(Resource)]
-struct Match {
+struct MatchInfo {
     round_count: usize,
     rounds_total: usize,
 }
+
+#[derive(Component)]
+struct OnMatchView;
 
 #[derive(Component, Clone)]
 struct OnScoredScreen;
@@ -325,15 +325,5 @@ struct OnScoredScreen;
 #[derive(Component, Clone)]
 struct OnEndScreen;
 
-#[derive(Component)]
-struct OnCountdownScreen;
-
 #[derive(Resource, Deref, DerefMut)]
 struct GameTimer(Timer);
-
-#[derive(Component)]
-struct CountdownTimedMessage {
-    timer: Timer,
-    texts: [String; 4],
-    cursor: usize,
-}
