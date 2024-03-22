@@ -1,8 +1,11 @@
-// #![allow(unused)]
+#![allow(unused)]
 
-use bevy::prelude::*;
+use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
+use bevy_vector_shapes::prelude::*;
+use fps::{fps_counter_showhide, fps_text_update_system, setup_fps_counter};
 use systems::*;
 
+mod fps;
 mod systems;
 
 const PADDLE_SIZE: Vec3 = Vec3::new(20., 150., 0.0);
@@ -10,7 +13,7 @@ const GAP_BETWEEN_PADDLE_AND_GOAL: f32 = 60.0;
 const PADDLE_SPEED: f32 = 500.;
 
 const BALL_START_POSITION: Vec3 = Vec3::new(0., 0., 1.);
-const BALL_RADIUS: f32 = 15.;
+const BALL_RADIUS: f32 = 10.;
 const BALL_START_SPEED: f32 = 800.;
 
 const WALL_THICKNESS: f32 = 10.;
@@ -53,6 +56,25 @@ const PADDLE_B_START_POSITION: Vec3 = Vec3::new(RIGHT_WALL - GAP_BETWEEN_PADDLE_
 
 const ROUNDS_TOTAL: usize = 2;
 
+fn main() {
+    App::new()
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "bevy-pong".to_string(),
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(Shape2dPlugin::default())
+        .insert_resource(ClearColor(BACKGROUND_COLOR))
+        .init_state::<GameState>()
+        .init_state::<RoundState>()
+        .add_systems(Startup, (setup, setup_fps_counter))
+        .add_plugins(TheGamePlugin)
+        .run();
+}
+
 struct TheGamePlugin;
 impl Plugin for TheGamePlugin {
     fn build(&self, app: &mut App) {
@@ -72,10 +94,12 @@ impl Plugin for TheGamePlugin {
         .add_systems(
             Update,
             (
+                fps_text_update_system,
+                fps_counter_showhide,
                 (run_scored).run_if(in_state(RoundState::Scored)),
                 run_countdown.run_if(in_state(RoundState::Countdown)),
                 run_end.run_if(in_state(GameState::End)),
-                (update_score_ui, bevy::window::close_on_esc).in_set(MatchSet),
+                (update_score_ui, bevy::window::close_on_esc, run_match).in_set(MatchSet),
                 run_menu.run_if(in_state(GameState::Menu)),
             ),
         )
@@ -104,17 +128,6 @@ impl Plugin for TheGamePlugin {
         .add_event::<CollisionEvent>()
         .add_event::<ScoreEvent>();
     }
-}
-
-fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .insert_resource(ClearColor(BACKGROUND_COLOR))
-        .init_state::<GameState>()
-        .init_state::<RoundState>()
-        .add_systems(Startup, setup)
-        .add_plugins(TheGamePlugin)
-        .run();
 }
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
@@ -191,6 +204,27 @@ struct WallBundle {
     boundary_type: Wall,
 }
 
+impl WallBundle {
+    fn new(location: WallLocation) -> WallBundle {
+        WallBundle {
+            sprite_bundle: SpriteBundle {
+                transform: Transform {
+                    translation: location.position().extend(0.0),
+                    scale: location.size().extend(1.0),
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: WALL_COLOR,
+                    ..default()
+                },
+                ..default()
+            },
+            collider: Collider,
+            boundary_type: Wall,
+        }
+    }
+}
+
 enum WallLocation {
     Bottom,
     Top,
@@ -211,27 +245,6 @@ impl WallLocation {
             WallLocation::Bottom | WallLocation::Top => {
                 Vec2::new(arena_width + WALL_THICKNESS, WALL_THICKNESS)
             }
-        }
-    }
-}
-
-impl WallBundle {
-    fn new(location: WallLocation) -> WallBundle {
-        WallBundle {
-            sprite_bundle: SpriteBundle {
-                transform: Transform {
-                    translation: location.position().extend(0.0),
-                    scale: location.size().extend(1.0),
-                    ..default()
-                },
-                sprite: Sprite {
-                    color: WALL_COLOR,
-                    ..default()
-                },
-                ..default()
-            },
-            collider: Collider,
-            boundary_type: Wall,
         }
     }
 }

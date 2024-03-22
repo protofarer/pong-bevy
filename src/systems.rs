@@ -3,8 +3,10 @@ use std::time::Duration;
 use bevy::{
     math::bounding::{Aabb2d, BoundingCircle, BoundingVolume, IntersectsVolume},
     prelude::*,
+    render::camera::ScalingMode,
     sprite::MaterialMesh2dBundle,
 };
+use bevy_vector_shapes::prelude::*;
 
 use crate::{
     Ball, Collider, CollisionEvent, CollisionSound, CountdownTimedMessage, GameState, GameTimer,
@@ -24,6 +26,13 @@ pub fn setup(
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     commands.spawn(Camera2dBundle::default());
+    // commands.spawn(Camera2dBundle {
+    //     projection: OrthographicProjection {
+    //         scaling_mode: ScalingMode::WindowSize(1.),
+    //         ..default()
+    //     },
+    //     ..default()
+    // });
 
     let wall_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
     let paddle_collision_sound = asset_server.load("sounds/med_shoot.wav");
@@ -344,6 +353,7 @@ pub fn setup_match(
     mut scores: ResMut<Scores>,
     mut match_: ResMut<Match>,
     mut next_state: ResMut<NextState<RoundState>>,
+    mut commands: Commands,
 ) {
     info!("IN setup_match");
     scores.a = 0;
@@ -628,4 +638,35 @@ pub fn run_countdown(
             text.sections[0].value = countdowner.texts[countdowner.cursor].clone();
         }
     }
+}
+
+pub fn draw_midline(mut painter: ShapePainter) {
+    let height = TOP_WALL - BOTTOM_WALL - WALL_THICKNESS;
+    let width = 1.0;
+    let n_dashes = 10.;
+    let dash_length = height / (2. * n_dashes);
+    let line_color = Color::WHITE;
+
+    painter.thickness = width;
+    painter.color = line_color;
+
+    let mut points = Vec::new();
+    let mut y = (-height / 2.) + (0.5 * dash_length);
+    while y < height / 2. {
+        points.push(y);
+        y += dash_length * 2.;
+    }
+
+    // painter.line(
+    //     (Vec3::new(0., line_length / 2., 0.)),
+    //     Vec3::new(0., -line_length / 2., 0.),
+    // );
+
+    for &y in points.iter() {
+        painter.line(Vec3::new(0., y, 0.), Vec3::new(0., y + dash_length, 0.));
+    }
+}
+
+pub fn run_match(mut painter: ShapePainter) {
+    draw_midline(painter);
 }
