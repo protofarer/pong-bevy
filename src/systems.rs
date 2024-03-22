@@ -208,11 +208,9 @@ pub fn check_for_collisions(
 
                 match collision {
                     Collision::Right => {
-                        println!("FIRING SCORE EVENT for B",);
                         score_events.send(ScoreEvent::B);
                     }
                     Collision::Left => {
-                        println!("FIRING SCORE EVENT for A",);
                         score_events.send(ScoreEvent::A);
                     }
                     _ => {}
@@ -490,8 +488,7 @@ pub fn run_scored(
         score_events.clear();
 
         match_.round_count += 1;
-        println!("match round count {}", match_.round_count);
-        println!("match round total {}", match_.rounds_total);
+        println!("match {}/{}", match_.round_count, match_.rounds_total);
 
         if match_.round_count == match_.rounds_total {
             // will use the Exit Gamestate::Match to display victory screen
@@ -508,7 +505,6 @@ pub fn setup_countdown(
     mut q_paddle: Query<(&mut Transform, &Player), With<Paddle>>,
     mut commands: Commands,
 ) {
-    println!("run setup_countdown",);
     let (mut ball_transform, mut ball_velocity) = q_ball.single_mut();
     ball_transform.translation = BALL_START_POSITION;
     *ball_velocity = Velocity(rand_ball_dir() * BALL_START_SPEED);
@@ -608,14 +604,11 @@ pub fn setup_countdown(
                 }),));
             });
     });
-    // println!("countdown_ui_entity: {:?}", base_id);
 }
 
 pub fn run_countdown(
-    mut q_ui_node: Query<&mut Node, With<OnCountdownScreen>>,
-    mut q_ui_text: Query<(&Parent, &mut Text)>,
+    mut q_ui_text: Query<&mut Text>,
     mut query_countdown: Query<&mut CountdownTimedMessage>,
-    mut commands: Commands,
     time: Res<Time>,
     mut next_state: ResMut<NextState<RoundState>>,
 ) {
@@ -631,7 +624,7 @@ pub fn run_countdown(
             return;
         }
         let result = q_ui_text.get_single_mut();
-        if let Ok((parent, mut text)) = result {
+        if let Ok(mut text) = result {
             text.sections[0].value = countdowner.texts[countdowner.cursor].clone();
         }
     }
