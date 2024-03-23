@@ -3,7 +3,10 @@ use std::time::Duration;
 use bevy::prelude::*;
 
 use crate::{
-    despawn_screen, match_::{rand_ball_dir, Ball, Paddle, Player, RoundState, Velocity}, BALL_START_POSITION, BALL_START_SPEED, PADDLE_A_START_POSITION, PADDLE_B_START_POSITION, TEXT_COLOR
+    despawn_screen,
+    match_::{rand_ball_dir, Ball, Paddle, Player, RoundState, Velocity},
+    BALL_START_POSITION, BALL_START_SPEED, BALL_START_VELOCITY, PADDLE_A_START_POSITION,
+    PADDLE_B_START_POSITION, TEXT_COLOR,
 };
 
 pub fn countdown_plugin(app: &mut App) {
@@ -37,7 +40,7 @@ pub fn setup_countdown(
 ) {
     let (mut ball_transform, mut ball_velocity) = q_ball.single_mut();
     ball_transform.translation = BALL_START_POSITION;
-    *ball_velocity = Velocity(rand_ball_dir() * BALL_START_SPEED);
+    *ball_velocity = Velocity(BALL_START_VELOCITY);
 
     for (mut paddle_transform, player) in q_paddle.iter_mut() {
         match player {

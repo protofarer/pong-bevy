@@ -23,6 +23,10 @@ const BALL_START_POSITION: Vec3 = Vec3::new(0., 0., 1.);
 const BALL_RADIUS: f32 = 10.;
 const BALL_START_SPEED: f32 = 800.;
 
+const X: f32 = -1.0;
+const Y: f32 = 0.;
+const BALL_START_VELOCITY: Vec2 = Vec2::new(X * BALL_START_SPEED, Y * BALL_START_SPEED);
+
 const WALL_THICKNESS: f32 = 10.;
 const LEFT_WALL: f32 = -450.;
 const RIGHT_WALL: f32 = 450.;

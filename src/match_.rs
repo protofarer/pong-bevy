@@ -7,10 +7,11 @@ use bevy_vector_shapes::{painter::ShapePainter, shapes::LinePainter};
 
 use crate::{
     despawn_screen, spawn_timed_message, CollisionEvent, CollisionSound, GameState, GameTimer,
-    MatchInfo, ScoreEvent, Scores, BALL_COLOR, BALL_RADIUS, BALL_START_POSITION, BALL_START_SPEED,
-    BOTTOM_WALL, GAP_BETWEEN_PADDLE_AND_GOAL, GOAL_COLOR, GOAL_THICKNESS, LEFT_WALL, PADDLE_COLOR,
-    PADDLE_SIZE, PADDLE_SPEED, RIGHT_WALL, SCORE_A_POSITION, SCORE_B_POSITION, SCORE_FONT_SIZE,
-    TEXT_COLOR, TOP_WALL, WALL_COLOR, WALL_THICKNESS,
+    MatchInfo, RoundData, ScoreEvent, Scores, BALL_COLOR, BALL_RADIUS, BALL_START_POSITION,
+    BALL_START_SPEED, BALL_START_VELOCITY, BOTTOM_WALL, GAP_BETWEEN_PADDLE_AND_GOAL, GOAL_COLOR,
+    GOAL_THICKNESS, LEFT_WALL, PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED, RIGHT_WALL,
+    SCORE_A_POSITION, SCORE_B_POSITION, SCORE_FONT_SIZE, TEXT_COLOR, TOP_WALL, WALL_COLOR,
+    WALL_THICKNESS,
 };
 
 pub fn match_plugin(app: &mut App) {
@@ -77,7 +78,7 @@ pub struct Paddle;
 #[derive(Component)]
 pub struct Ball;
 
-#[derive(Component, Deref, DerefMut)]
+#[derive(Component, Deref, DerefMut, Debug)]
 pub struct Velocity(pub Vec2);
 
 #[derive(Component)]
@@ -265,7 +266,7 @@ pub fn setup_match(
             ..default()
         },
         Ball,
-        Velocity(rand_ball_dir() * BALL_START_SPEED),
+        Velocity(BALL_START_VELOCITY),
         OnMatchView,
     ));
 
@@ -405,13 +406,17 @@ pub fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<T
 
 pub fn check_for_collisions(
     mut ball_query: Query<(&mut Velocity, &Transform), With<Ball>>,
-    collider_query: Query<(&Transform, Option<&Goal>, Option<&Wall>), With<Collider>>,
+    collider_query: Query<
+        (&Transform, Option<&Goal>, Option<&Wall>, Option<&Paddle>),
+        With<Collider>,
+    >,
     mut collision_events: EventWriter<CollisionEvent>,
     mut score_events: EventWriter<ScoreEvent>,
+    mut round_data: ResMut<RoundData>,
 ) {
     let (mut ball_velocity, ball_transform) = ball_query.single_mut();
 
-    for (transform, goal, wall) in &collider_query {
+    for (transform, goal, wall, paddle) in &collider_query {
         let collision = collide_with_side(
             BoundingCircle::new(ball_transform.translation.truncate(), BALL_RADIUS),
             Aabb2d::new(
@@ -447,8 +452,18 @@ pub fn check_for_collisions(
                 if reflect_y {
                     ball_velocity.y = -ball_velocity.y;
                 }
-            } else {
+            } else if paddle.is_some() {
                 collision_events.send(CollisionEvent::Paddle);
+
+                // Increase ball speed every 3 returns
+                round_data.paddle_hit_count += 1;
+                if round_data.paddle_hit_count % 3 == 0 {
+                    *ball_velocity = Velocity(ball_velocity.0 * 1.03);
+                    info!(
+                        "Increase ball velocity due to paddle hit to {:?}",
+                        ball_velocity
+                    );
+                }
 
                 let mut reflect_y = false;
                 let mut reflect_x = false;
@@ -465,7 +480,21 @@ pub fn check_for_collisions(
                 }
 
                 if reflect_x {
+                    // TODO calc new ball angle based on distance from paddle center
+                    let relative_impact_length = (ball_transform.translation.y
+                        - transform.translation.y)
+                        / (PADDLE_SIZE.y / 2.);
+                    info!("rel_impact_len {}", relative_impact_length);
+                    let dy = match relative_impact_length {
+                        k if k <= 0.25 => 0.,
+                        k if k > 0.25 => 50.,
+                        k if k < -0.25 => -50.,
+                        _ => 0.,
+                    };
+                    info!("ball vel_y increased by: {}", dy);
+
                     ball_velocity.x = -ball_velocity.x;
+                    ball_velocity.y += dy;
                 }
             }
         }
@@ -573,7 +602,7 @@ pub fn setup_end(commands: Commands, scores: Res<Scores>, mut match_: ResMut<Mat
         spawn_timed_message(commands, "Player A wins the match!", 1.0, OnEndScreen);
     } else {
         spawn_timed_message(commands, "Player B wins the match!", 1.0, OnEndScreen);
-    } 
+    }
 }
 
 pub fn run_end(

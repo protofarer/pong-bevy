@@ -35,6 +35,9 @@ pub fn setup(
         round_count: 0,
         rounds_total: ROUNDS_TOTAL,
     });
+    commands.insert_resource(RoundData {
+        paddle_hit_count: 0,
+    });
 
     next_state.set(GameState::Menu);
 }
@@ -69,6 +72,11 @@ pub struct Scores {
 pub struct MatchInfo {
     pub round_count: usize,
     pub rounds_total: usize,
+}
+
+#[derive(Resource)]
+pub struct RoundData {
+    pub paddle_hit_count: usize,
 }
 
 pub fn spawn_timed_message(
