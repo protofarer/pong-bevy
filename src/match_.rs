@@ -6,7 +6,7 @@ use bevy::{
 use bevy_vector_shapes::{painter::ShapePainter, shapes::LinePainter};
 
 use crate::{
-    despawn_screen, spawn_timed_message, CollisionEvent, CollisionSound, GameState, GameTimer,
+    despawn_screen, spawn_timed_message, CollisionEvent, CollisionSounds, GameState, GameTimer,
     MatchInfo, RoundData, ScoreEvent, Scores, BALL_COLOR, BALL_RADIUS, BALL_START_POSITION,
     BALL_START_SPEED, BALL_START_VELOCITY, BOTTOM_WALL, GAP_BETWEEN_PADDLE_AND_GOAL, GOAL_COLOR,
     GOAL_THICKNESS, LEFT_WALL, PADDLE_COLOR, PADDLE_SIZE, PADDLE_SPEED, RIGHT_WALL,
@@ -541,7 +541,7 @@ pub fn collide_with_side(ball: BoundingCircle, boundary: Aabb2d) -> Option<Colli
 pub fn play_collision_sound(
     mut commands: Commands,
     mut collision_events: EventReader<CollisionEvent>,
-    sound: Res<CollisionSound>,
+    sound: Res<CollisionSounds>,
 ) {
     // play sound once per frame if collision occurred
     for ev in collision_events.read() {

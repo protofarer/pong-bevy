@@ -25,7 +25,7 @@ pub fn setup(
     let wall_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
     let paddle_collision_sound = asset_server.load("sounds/med_shoot.wav");
     let goal_collision_sound = asset_server.load("sounds/jump.wav");
-    commands.insert_resource(CollisionSound {
+    commands.insert_resource(CollisionSounds {
         wall: wall_collision_sound,
         paddle: paddle_collision_sound,
         goal: goal_collision_sound,
@@ -56,7 +56,8 @@ pub enum ScoreEvent {
 }
 
 #[derive(Resource)]
-pub struct CollisionSound {
+pub struct tst
+CollisionSounds {
     pub wall: Handle<AudioSource>,
     pub paddle: Handle<AudioSource>,
     pub goal: Handle<AudioSource>,
